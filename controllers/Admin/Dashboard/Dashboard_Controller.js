@@ -172,13 +172,15 @@ exports.dashboardCountAdmin = async (req, res) => {
     });
 
     const totalRevenue_Earnings = await Wallet.sum("amount", {
-      where: { status: "active", wallet_type: "credit", 
-                refund_status: {
-                    [Op.ne]: "refund"
-                  }
-                },
-    });
-
+        where: {
+          status: "active",
+          wallet_type: "credit",
+          [Op.or]: [
+            { refund_status: { [Op.ne]: "refund" } },
+            { refund_status: null }
+          ]
+        },
+      });
     // ✅ Total Wallet Amount (active & approved companies)
     const result = await sequelize.query(
       `
