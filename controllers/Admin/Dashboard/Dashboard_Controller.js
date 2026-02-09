@@ -10,6 +10,252 @@ const sequelize = require('@config/db');
 const { Op, fn, col, where, literal, NUMBER,Sequelize, cast } = require('sequelize');
 const moment = require('moment-timezone');
 
+// exports.dashboardCountAdmin = async (req, res) => {
+//   try {
+//     const { privileges, isSuperAdmin, role_name, id: userId } = req.user;
+
+//     // Permission check
+//     if (!isSuperAdmin && !privileges.includes("dashboard_view")) {
+//       return res.status(403).json({
+//         status: 403,
+//         message: "Sorry, You Have No Permission For This Request",
+//       });
+//     }
+
+//     // Base conditions
+//     let societyWhere = { status: "active" };
+//     let campaignWhere = { status: "active" };
+//     let companyWhere = { status: "active" };
+
+//     // If RM, restrict to their assigned records
+//     let rmCompanyIds = [];
+//     if (role_name === "RELATIONSHIP MANAGER") {
+//       societyWhere.relationship_manager_id = userId;
+//       companyWhere.relationship_manager_id = userId;
+
+//       // Only count approved societies & companies for RM
+//       societyWhere.kyc_status = "approved";
+//       companyWhere.kyc_status = "approved";
+
+//       // Get all company IDs under this RM
+//       const rmCompanies = await Company_Registration.findAll({
+//         attributes: ["id"],
+//         where: companyWhere,
+//       });
+//       rmCompanyIds = rmCompanies.map(c => c.id);
+
+//       // Restrict campaigns to only RM's companies
+//       if (rmCompanyIds.length > 0) {
+//         campaignWhere.company_id = { [Op.in]: rmCompanyIds };
+//       } else {
+//         campaignWhere.company_id = null; // no companies assigned → no campaigns
+//       }
+//     }
+
+//     // Societies & Companies counts
+//     const totalSocieties = await Society_Registration.count({ where: societyWhere });
+//     const totalCompanies = await Company_Registration.count({ where: companyWhere });
+
+//     // Campaign counts
+//     // const totalCampaigns = await Campaign.count({ where: campaignWhere });
+
+
+//     const totalCampaigns = await Campaign.count({
+//     where: {
+//       ...campaignWhere,
+//       company_id: {
+//         [Op.in]: Sequelize.literal(`(
+//           SELECT id FROM company_registration
+//           WHERE status != 'delete'
+//         )`)
+//       }
+//     },
+//   });
+
+//     // const totalCampaignAdmin = await Campaign.count({
+//     //   where: {
+//     //     ...campaignWhere,
+//     //     campaign_status: "pending",
+//     //   },
+//     // });
+
+//     // ✅ Campaigns awaiting admin approval (exclude deleted companies)
+//     const totalCampaignAdmin = await Campaign.count({
+//       where: {
+//         ...campaignWhere,
+//         campaign_status: "pending",
+//         company_id: {
+//           [Op.in]: Sequelize.literal(`(
+//             SELECT id FROM company_registration
+//             WHERE status != 'delete'
+//           )`)
+//         },
+//       },
+//     });
+
+//     // const totalCampaignSociety = await Campaign_Log.count({
+//     //   where: {
+//     //     status: "active",
+//     //     campaign_status: "pending",
+//     //     admin_approved_status: "approved",
+//     //     ...(rmCompanyIds.length > 0 ? { company_id: { [Op.in]: rmCompanyIds } } : {}),
+//     //   },
+//     // });
+
+
+//     const totalCampaignSociety = await Campaign_Log.count({
+//       where: {
+//         status: "active",
+//         campaign_status: "pending",
+//         admin_approved_status: "approved",
+//         ...(rmCompanyIds.length > 0 ? { company_id: { [Op.in]: rmCompanyIds } } : {}),
+//         company_id: {
+//           [Op.in]: Sequelize.literal(`(
+//             SELECT id FROM company_registration
+//             WHERE status != 'delete'
+//           )`)
+//         }
+//       },
+//     });
+
+//     // Live campaigns
+//     const currentIST = moment.tz("Asia/Kolkata").toDate();
+//     const liveCampaignLogs = await Campaign_Log.findAll({
+//       where: {
+//         live_start_date: { [Op.lte]: currentIST },
+//         live_end_date: { [Op.gte]: currentIST },
+//         ...(rmCompanyIds.length > 0 ? { company_id: { [Op.in]: rmCompanyIds } } : {}),
+//       },
+//     });
+//     const liveCampaignIds = liveCampaignLogs.map(log => log.campaign_id);
+
+//     // const totalCampaignLive = await Campaign.count({
+//     //   where: {
+//     //     ...campaignWhere,
+//     //     campaign_status: "approved",
+//     //     id: { [Op.in]: liveCampaignIds },
+//     //   },
+//     // });
+
+//     const totalCampaignLive = await Campaign.count({
+//       where: {
+//         ...campaignWhere,
+//         campaign_status: "approved",
+//         id: { [Op.in]: liveCampaignIds },
+//         company_id: {
+//           [Op.in]: Sequelize.literal(`(
+//             SELECT id FROM company_registration
+//             WHERE status != 'delete'
+//           )`)
+//         }
+//       },
+//     });
+
+//     // // Completed campaigns
+//     // const totalCampaignCompleted = await Campaign.count({
+//     //   where: {
+//     //     ...campaignWhere,
+//     //     campaign_status: "completed",
+//     //   },
+//     // });
+
+//     // ✅ Completed campaigns (exclude deleted companies)
+//     const totalCampaignCompleted = await Campaign.count({
+//       where: {
+//         ...campaignWhere,
+//         campaign_status: "completed",
+//         company_id: {
+//           [Op.in]: Sequelize.literal(`(
+//             SELECT id FROM company_registration
+//             WHERE status != 'delete'
+//           )`)
+//         }
+//       },
+//     });
+
+//     // // ✅ Payments & Wallets (platform level, not RM-restricted unless required)
+//     // const totalCampaignPayments = await Campaign.sum("campaign_amount", {
+//     //   where: { status: "active", campaign_status: "completed" },
+//     // });
+
+//     // ✅ Payments & Wallets
+//     const totalCampaignPayments = await Campaign.sum("campaign_amount", {
+//       where: {
+//         status: "active",
+//         campaign_status: "completed",
+//         company_id: {
+//           [Op.in]: Sequelize.literal(`(
+//             SELECT id FROM company_registration
+//             WHERE status != 'delete'
+//           )`)
+//         }
+//       },
+//     });
+
+//     const totalSocietyPayments = await Society_Wallet_Payment.sum("amount", {
+//       where: { status: "active", wallet_type: "credit" },
+//     });
+
+//     const totalSocietyPaid = await Society_Withdraw_Payments.sum("withdraw_amount", {
+//       where: { status: "active", payment_status: "approved" },
+//     });
+
+//     const totalPotential_Earnings = await Wallet.sum("amount", {
+//       where: { status: "active", wallet_type: "credit" },
+//     });
+
+
+//         // Total Wallet Amount (all active & approved companies)
+//         const result = await sequelize.query(
+//         `
+//             SELECT COALESCE(SUM(CAST(wallet_amount AS NUMERIC)), 0) AS total_wallet_amount
+//             FROM "company_registration"
+//             WHERE status = :status AND kyc_status = :kyc_status
+//         `,
+//         {
+//             replacements: { status: 'active', kyc_status: 'approved' },
+//             type: sequelize.QueryTypes.SELECT,
+//         }
+//         );
+
+// // Since we used QueryTypes.SELECT, result is an array of objects
+// const totalWalletAmount = parseFloat(result[0].total_wallet_amount) || 0;
+
+
+//     const totalPlatforms_ActualEarning = totalCampaignPayments - totalSocietyPayments;
+//     const totalSocietyPending = totalSocietyPayments - totalSocietyPaid;
+
+//     return res.status(200).json({
+//       status: 200,
+//       message: "Dashboard counts fetched successfully",
+//       data: {
+//         totalSocieties,
+//         totalCompanies,
+//         totalCampaigns,
+//         totalCampaignAdmin,
+//         totalCampaignSociety,
+//         totalCampaignLive,
+//         totalCampaignCompleted,
+//         totalCampaignPayments,
+//         totalSocietyPayments,
+//         totalSocietyPaid,
+//         totalSocietyPending,
+//         totalPotential_Earnings,
+//         totalPlatforms_ActualEarning,
+//         totalWalletAmount
+//       },
+//     });
+//   } catch (error) {
+//     return res.status(500).json({
+//       status: 500,
+//       message: "Failed to fetch dashboard counts",
+//       error: error.message,
+//     });
+//   }
+// };
+
+
+
 exports.dashboardCountAdmin = async (req, res) => {
   try {
     const { privileges, isSuperAdmin, role_name, id: userId } = req.user;
@@ -52,30 +298,64 @@ exports.dashboardCountAdmin = async (req, res) => {
       }
     }
 
-    // Societies & Companies counts
+    // ✅ Societies & Companies counts
     const totalSocieties = await Society_Registration.count({ where: societyWhere });
     const totalCompanies = await Company_Registration.count({ where: companyWhere });
 
-    // Campaign counts
-    const totalCampaigns = await Campaign.count({ where: campaignWhere });
+    // ✅ Campaign counts (exclude deleted companies)
+    const totalCampaigns = await Campaign.count({
+      where: {
+        ...campaignWhere,
+        campaign_status: { [Op.ne]: 'draft' },
+        company_id: {
+          [Op.in]: Sequelize.literal(`(
+            SELECT id FROM company_registration
+            WHERE status != 'delete'
+          )`)
+        }
+      },
+    });
 
+    // ✅ Campaigns awaiting admin approval (exclude deleted companies)
     const totalCampaignAdmin = await Campaign.count({
       where: {
         ...campaignWhere,
         campaign_status: "pending",
+        company_id: {
+          [Op.in]: Sequelize.literal(`(
+            SELECT id FROM company_registration
+            WHERE status != 'delete'
+          )`)
+        },
       },
     });
 
-    const totalCampaignSociety = await Campaign_Log.count({
+    // // ✅ Pending society campaigns (already checks active companies)
+    // const totalCampaignSociety = await Campaign_Log.count({
+    //   where: {
+    //     status: "active",
+    //     campaign_status: "pending",
+    //     admin_approved_status: "approved",
+    //     ...(rmCompanyIds.length > 0 ? { company_id: { [Op.in]: rmCompanyIds } } : {}),
+    //   },
+    // });
+
+        const totalCampaignSociety = await Campaign_Log.count({
       where: {
         status: "active",
         campaign_status: "pending",
         admin_approved_status: "approved",
         ...(rmCompanyIds.length > 0 ? { company_id: { [Op.in]: rmCompanyIds } } : {}),
+        company_id: {
+          [Op.in]: Sequelize.literal(`(
+            SELECT id FROM company_registration
+            WHERE status != 'delete'
+          )`)
+        }
       },
     });
 
-    // Live campaigns
+    // ✅ Live campaigns (exclude deleted companies)
     const currentIST = moment.tz("Asia/Kolkata").toDate();
     const liveCampaignLogs = await Campaign_Log.findAll({
       where: {
@@ -91,20 +371,41 @@ exports.dashboardCountAdmin = async (req, res) => {
         ...campaignWhere,
         campaign_status: "approved",
         id: { [Op.in]: liveCampaignIds },
+        company_id: {
+          [Op.in]: Sequelize.literal(`(
+            SELECT id FROM company_registration
+            WHERE status != 'delete'
+          )`)
+        }
       },
     });
 
-    // Completed campaigns
+    // ✅ Completed campaigns (exclude deleted companies)
     const totalCampaignCompleted = await Campaign.count({
       where: {
         ...campaignWhere,
         campaign_status: "completed",
+        company_id: {
+          [Op.in]: Sequelize.literal(`(
+            SELECT id FROM company_registration
+            WHERE status != 'delete'
+          )`)
+        }
       },
     });
 
-    // ✅ Payments & Wallets (platform level, not RM-restricted unless required)
+    // ✅ Payments & Wallets
     const totalCampaignPayments = await Campaign.sum("campaign_amount", {
-      where: { status: "active", campaign_status: "completed" },
+      where: {
+        status: "active",
+        campaign_status: "completed",
+        company_id: {
+          [Op.in]: Sequelize.literal(`(
+            SELECT id FROM company_registration
+            WHERE status != 'delete'
+          )`)
+        }
+      },
     });
 
     const totalSocietyPayments = await Society_Wallet_Payment.sum("amount", {
@@ -115,31 +416,30 @@ exports.dashboardCountAdmin = async (req, res) => {
       where: { status: "active", payment_status: "approved" },
     });
 
-    const totalPotential_Earnings = await Wallet.sum("amount", {
+    const totalRevenue_Earnings = await Wallet.sum("amount", {
       where: { status: "active", wallet_type: "credit" },
     });
 
+    // ✅ Total Wallet Amount (active & approved companies)
+    const result = await sequelize.query(
+      `
+        SELECT COALESCE(SUM(CAST(wallet_amount AS NUMERIC)), 0) AS total_wallet_amount
+        FROM "company_registration"
+        WHERE status = :status AND kyc_status = :kyc_status
+      `,
+      {
+        replacements: { status: 'active', kyc_status: 'approved' },
+        type: sequelize.QueryTypes.SELECT,
+      }
+    );
 
-        // Total Wallet Amount (all active & approved companies)
-        const result = await sequelize.query(
-        `
-            SELECT COALESCE(SUM(CAST(wallet_amount AS NUMERIC)), 0) AS total_wallet_amount
-            FROM "company_registration"
-            WHERE status = :status AND kyc_status = :kyc_status
-        `,
-        {
-            replacements: { status: 'active', kyc_status: 'approved' },
-            type: sequelize.QueryTypes.SELECT,
-        }
-        );
+    const totalWalletAmount = parseFloat(result[0].total_wallet_amount) || 0;
 
-// Since we used QueryTypes.SELECT, result is an array of objects
-const totalWalletAmount = parseFloat(result[0].total_wallet_amount) || 0;
+    // ✅ Derived metrics
+    const totalPlatforms_ActualEarning = (totalCampaignPayments || 0) - (totalSocietyPayments || 0);
+    const totalSocietyPending = (totalSocietyPayments || 0) - (totalSocietyPaid || 0);
 
-
-    const totalPlatforms_ActualEarning = totalCampaignPayments - totalSocietyPayments;
-    const totalSocietyPending = totalSocietyPayments - totalSocietyPaid;
-
+    // ✅ Response
     return res.status(200).json({
       status: 200,
       message: "Dashboard counts fetched successfully",
@@ -155,11 +455,12 @@ const totalWalletAmount = parseFloat(result[0].total_wallet_amount) || 0;
         totalSocietyPayments,
         totalSocietyPaid,
         totalSocietyPending,
-        totalPotential_Earnings,
+        totalRevenue_Earnings,
         totalPlatforms_ActualEarning,
-        totalWalletAmount
+        totalWalletAmount,
       },
     });
+
   } catch (error) {
     return res.status(500).json({
       status: 500,
@@ -206,6 +507,7 @@ exports.liveDataTableAdmin = async (req, res) => {
      
       const liveCampaignLogs = await Campaign_Log.findAll({
         where: {
+          status: { [Op.ne]: 'delete' },
           live_start_date: { [Op.lte]: currentIST },
           live_end_date: { [Op.gte]: currentIST }
         }
@@ -282,15 +584,6 @@ exports.liveDataTableAdmin = async (req, res) => {
                 }
             const liveCount = await Campaign.count({ where: liveWhere });
         // RM Code end
-
-    //    // Count campaigns with matching campaign_ids
-    //    const liveCount = await Campaign.count({
-    //        where: {
-    //            ...baseWhereClause,
-    //            campaign_status: 'approved',
-    //             id: { [Op.in]: liveCampaignIdsForCount }
-    //        }
-    //    });
 
       const campaign = await Campaign.findAll({
           where: whereClause,

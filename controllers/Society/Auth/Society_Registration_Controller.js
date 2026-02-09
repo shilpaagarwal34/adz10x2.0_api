@@ -395,7 +395,7 @@ AWS.config.update({
             message: "Society registered successfully. Please check your email for login details.",
             data: {
                 token,
-                otp:"",
+                // otp:"",
                 notification,
                 newSocietyProfile: newSocietyProfile 
             },

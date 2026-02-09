@@ -63,6 +63,9 @@ router.get('/campaign-rejects-date-crossed', CampaignControllerAdmin.campaignRej
 router.post('/truncate-all', baseController.truncateAllTables);
 router.post('/truncate-all-ids', baseController.truncateAllTablesWithIds);
 
+  router.post('/contact-enquiry', baseController.sendContactEnquiryMail);
+
+
 //  admin routes
 router.get('/admin/notification', authenticateUser, adminNotificationController.adminNotification);
 router.get('/company/notification', authenticateCompanyUser, companyNotificationController.companyNotification);
@@ -160,6 +163,7 @@ router.get('/check-mobile-exist', baseController.checkMobile);
 //  get all company for admin start
   router.get('/all-company', baseController.getAllCompanys);
   router.get('/all-society', baseController.getAllSociety);
+
 // get all compny for admin end
 
 

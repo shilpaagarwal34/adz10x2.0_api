@@ -362,7 +362,7 @@ exports.companyRegistration = async (req, res) => {
             data: {
                 token,
                 notification,
-                otp,
+                // otp,
                 companyProfile: newCompanyProfile // Updated response key
             },
         });

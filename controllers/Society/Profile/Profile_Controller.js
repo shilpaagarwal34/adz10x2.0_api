@@ -399,301 +399,599 @@ exports.getSocietyProfileSlot = async (req, res) => {
 };
 
 exports.societyRegistrationUpdateImage = async (req, res) => {
-    
-    try {
-       
-           let societyId = null;
-           let societyUserId = null;
-           let societyType = null;
-           let societyUserType = null;
-       
-           let userId = req.user.id;
-           let userType = req.user_type;
-            let user_id = null;
-       
-           if (userType === 'Society_Admin') {
-             societyId = userId;
-            //  societyType = userType;
-             societyType = 'Society_Admin';
-           } else if (userType === 'Society_User') {
-             user_id = userId;
-            //  societyUserType = userType;
-              societyType = 'Society_User';
+  try {
+    let societyId = null;
+    let societyUserId = null;
+    let societyType = null;
+    let societyUserType = null;
+    let userId = req.user.id;
+    let userType = req.user_type;
+    let user_id = null;
 
-             const societyUser = await Society_User.findOne({ where: { id: societyUserId } });
-             societyId = societyUser.society_id;
-           }
+    // ✅ Identify society based on user type
+    if (userType === 'Society_Admin') {
+      societyId = userId;
+      societyType = 'Society_Admin';
+    } else if (userType === 'Society_User') {
+      user_id = userId;
+      societyType = 'Society_User';
+      const societyUser = await Society_User.findOne({ where: { id: userId } });
+      if (!societyUser) {
+        return res.status(404).json({ status: 404, message: "Society user not found" });
+      }
+      societyId = societyUser.society_id;
+    }
 
-        if (!societyId) {
-            return res.status(404).json({ status: 404, message: "User not found or invalid token" });
-        }
+    if (!societyId) {
+      return res.status(404).json({ status: 404, message: "User not found or invalid token" });
+    }
 
-          const check_edit = await Society_Registration.findOne({ where:{ id: societyId } });
-            
-       if (check_edit.kyc_status === 'approved') {
-                if (!check_edit.allow_edit) {
-                    return res.status(403).json({
-                        status: 403,
-                        message: "Allow edit permission for admin."
-                    });
-                }
-        }
+    const check_edit = await Society_Registration.findOne({ where: { id: societyId } });
+    if (check_edit.kyc_status === 'approved' && !check_edit.allow_edit) {
+      return res.status(403).json({
+        status: 403,
+        message: "Allow edit permission for admin."
+      });
+    }
 
-        let profile = await Society_Profile.findOne({ where: { society_id: societyId } });
+    let profile = await Society_Profile.findOne({ where: { society_id: societyId } });
+    if (!profile) {
+      return res.status(404).json({ status: 404, message: "Society profile not found, please create first" });
+    }
 
-        // If profile does not exist, return an error
-        if (!profile) {
-            return res.status(404).json({ status: 404, message: "Society profile not found, please create first" });
-        }
+    // ✅ Required field validation
+    const requiredFields = {
+      society_name: "Society name is required",
+      name: "Name is required",
+      mobile_number: "Mobile number is required",
+      email: "Email is required",
+      city_id: "City is required",
+      pincode: "Pincode is required",
+      address: "Address is required",
+    };
 
-        // Required field validation
-        const requiredFields = {
-            society_name: "Society name is required",
-            name: "Name is required",
-            mobile_number: "Mobile number is required",
-            email: "Email is required",
-            city_id: "City is required",
-            pincode: "Pincode is required",
-            address: "Address is required",
-        };
+    for (let field in requiredFields) {
+      if (!req.body[field]) {
+        return res.status(400).json({ status: 400, message: requiredFields[field] });
+      }
+    }
 
-        for (let field in requiredFields) {
-            if (!req.body[field]) {
-                return res.status(400).json({ status: 400, message: requiredFields[field] });
-            }
-        }
+    // ✅ Handle uploaded images
+    let uploadedImages = req.files['society_profile_img_1_5_path'] || [];
+    let image_1_5_Paths = uploadedImages.map(file => `uploads/${file.filename}`);
+    let image_1_5_Names = uploadedImages.map(file => file.filename);
 
-        console.log('files', req.files['society_profile_img_1_5_path']);
-        
-            // Get newly uploaded images
-        let uploadedImages = req.files['society_profile_img_1_5_path'] || [];
-        let image_1_5_Paths = uploadedImages.map(file => `uploads/${file.filename}`);
-        let image_1_5_Names = uploadedImages.map(file => file.filename);
+    let updatedFields = {};
 
-        let updatedFields = {};
+    if (!profile.society_profile_img_1_path && image_1_5_Paths.length > 0) {
+      updatedFields.society_profile_img_1_path = image_1_5_Paths.shift();
+      updatedFields.society_profile_img_1_name = image_1_5_Names.shift();
+    }
+    if (!profile.society_profile_img_2_path && image_1_5_Paths.length > 0) {
+      updatedFields.society_profile_img_2_path = image_1_5_Paths.shift();
+      updatedFields.society_profile_img_2_name = image_1_5_Names.shift();
+    }
+    if (!profile.society_profile_img_3_path && image_1_5_Paths.length > 0) {
+      updatedFields.society_profile_img_3_path = image_1_5_Paths.shift();
+      updatedFields.society_profile_img_3_name = image_1_5_Names.shift();
+    }
+    if (!profile.society_profile_img_4_path && image_1_5_Paths.length > 0) {
+      updatedFields.society_profile_img_4_path = image_1_5_Paths.shift();
+      updatedFields.society_profile_img_4_name = image_1_5_Names.shift();
+    }
+    if (!profile.society_profile_img_5_path && image_1_5_Paths.length > 0) {
+      updatedFields.society_profile_img_5_path = image_1_5_Paths.shift();
+      updatedFields.society_profile_img_5_name = image_1_5_Names.shift();
+    }
 
-        if (!profile.society_profile_img_1_path && image_1_5_Paths.length > 0) {
-            updatedFields.society_profile_img_1_path = image_1_5_Paths.shift();
-            updatedFields.society_profile_img_1_name = image_1_5_Names.shift();
-        }
-        if (!profile.society_profile_img_2_path && image_1_5_Paths.length > 0) {
-            updatedFields.society_profile_img_2_path = image_1_5_Paths.shift();
-            updatedFields.society_profile_img_2_name = image_1_5_Names.shift();
-        }
-        if (!profile.society_profile_img_3_path && image_1_5_Paths.length > 0) {
-            updatedFields.society_profile_img_3_path = image_1_5_Paths.shift();
-            updatedFields.society_profile_img_3_name = image_1_5_Names.shift();
-        }
-        if (!profile.society_profile_img_4_path && image_1_5_Paths.length > 0) {
-            updatedFields.society_profile_img_4_path = image_1_5_Paths.shift();
-            updatedFields.society_profile_img_4_name = image_1_5_Names.shift();
-        }
-        if (!profile.society_profile_img_5_path && image_1_5_Paths.length > 0) {
-            updatedFields.society_profile_img_5_path = image_1_5_Paths.shift();
-            updatedFields.society_profile_img_5_name = image_1_5_Names.shift();
-        }
+    // ✅ Handle other images
+    const imageFields = [
+      "society_profile_img_path",
+      "society_whatsapp_img_path",
+      "pan_card_path",
+      "gst_certificate_path",
+      "other_document_path"
+    ];
 
-        // Handle multiple images dynamically
-        const imageFields = [
-            "society_profile_img_path",
-            "society_whatsapp_img_path",
-            "pan_card_path",
-            "gst_certificate_path",
-            "other_document_path"
-        ];
-        
-        let imagePaths = {};
-        let imageNames = {};
+    let imagePaths = {};
+    let imageNames = {};
 
-        imageFields.forEach(field => {
-            if (req.files[field] && req.files[field][0]) {
-                imagePaths[field] = `uploads/${req.files[field][0].filename}`;
-                imageNames[field] = path.basename(req.files[field][0].filename);
-            }
-        });
+    imageFields.forEach(field => {
+      if (req.files[field] && req.files[field][0]) {
+        imagePaths[field] = `uploads/${req.files[field][0].filename}`;
+        imageNames[field] = path.basename(req.files[field][0].filename);
+      }
+    });
 
-        // Determine if PAN card path is missing or required
-        const isPanCardRequired = 
-        !profile || // profile doesn't exist
-        !profile.pan_card_path || profile.pan_card_path === ""; // or pan_card_path is empty
+    // ✅ Require PAN card if missing
+    const isPanCardRequired =
+      !profile ||
+      !profile.pan_card_path ||
+      profile.pan_card_path === "";
 
-        // Validate PAN card file if required
-        if (isPanCardRequired && (!req.files["pan_card_path"] || !req.files["pan_card_path"][0])) {
-        return res.status(400).json({ status: 400, error: "PAN card is required." });
-        }
+    if (isPanCardRequired && (!req.files["pan_card_path"] || !req.files["pan_card_path"][0])) {
+      return res.status(400).json({ status: 400, error: "PAN card is required." });
+    }
 
-        // Validate city
-        const city = await City.findByPk(req.body.city_id);
-        if (!city) {
-            return res.status(404).json({ status: 404, message: "City not found" });
-        }
+    // ✅ Validate city
+    const city = await City.findByPk(req.body.city_id);
+    if (!city) {
+      return res.status(404).json({ status: 404, message: "City not found" });
+    }
 
-        // Handle area_id
-        let area_id = req.body.area_id;
-        if (!area_id && req.body.area_name) {
-            const existingArea = await Area.findOne({ where: { area_name: req.body.area_name, city_id: req.body.city_id } });
-            area_id = existingArea ? existingArea.id : (await Area.create({ city_id: req.body.city_id, area_name: req.body.area_name, status: 'active', created_ip_address: req.ip })).id;
-        }
-        if (!area_id) {
-            return res.status(400).json({ status: 400, message: "Area Name is required" });
-        }
-            // Run all queries in parallel using Promise.all()
-        const [SocietyemailExists, SocietymobileExists, CompanyemailExists, CompanymobileExists] = await Promise.all([
-            Society_Registration.findOne({ where: { email: req.body.email, id: { [Op.ne]: societyId }, status: { [Op.ne]: 'delete' } } }),
-            Society_Registration.findOne({ where: { mobile_number: req.body.mobile_number, id: { [Op.ne]: societyId }, status: { [Op.ne]: 'delete' } } }),
-            Company_Registration.findOne({ where: { email: req.body.email, id: { [Op.ne]: societyId }, status: { [Op.ne]: 'delete' } } }),
-            Company_Registration.findOne({ where: { mobile_number: req.body.mobile_number, id: { [Op.ne]: societyId }, status: { [Op.ne]: 'delete' } } })
-        ]);
+    // ✅ Handle area_id
+    let area_id = req.body.area_id;
+    if (!area_id && req.body.area_name) {
+      const existingArea = await Area.findOne({ where: { area_name: req.body.area_name, city_id: req.body.city_id } });
+      area_id = existingArea ? existingArea.id : (await Area.create({
+        city_id: req.body.city_id,
+        area_name: req.body.area_name,
+        status: 'active',
+        created_ip_address: req.ip
+      })).id;
+    }
+    if (!area_id) {
+      return res.status(400).json({ status: 400, message: "Area Name is required" });
+    }
 
-        if (SocietyemailExists || CompanyemailExists) {
-            return res.status(400).json({ status: 400, message: "Email already exists" });
-        }
+    // ✅ Parallel duplicate check
+    const [SocietyemailExists, SocietymobileExists, CompanyemailExists, CompanymobileExists] = await Promise.all([
+      Society_Registration.findOne({ where: { email: req.body.email, id: { [Op.ne]: societyId }, status: { [Op.ne]: 'delete' } } }),
+      Society_Registration.findOne({ where: { mobile_number: req.body.mobile_number, id: { [Op.ne]: societyId }, status: { [Op.ne]: 'delete' } } }),
+      Company_Registration.findOne({ where: { email: req.body.email, status: { [Op.ne]: 'delete' } } }),
+      Company_Registration.findOne({ where: { mobile_number: req.body.mobile_number, status: { [Op.ne]: 'delete' } } })
+    ]);
 
-        if (SocietymobileExists || CompanymobileExists) {
-            return res.status(400).json({ status: 400, message: "Mobile number already exists" });
-        }
-        // Update society registration
-     const society_registrations = await Society_Registration.update({
-            society_name: req.body.society_name,
-            name: req.body.name,
-            society_user_id:user_id,
-            mobile_number: req.body.mobile_number,
-            email: req.body.email,
-            city_id: req.body.city_id,
-            area_id,
-            
-            pincode: req.body.pincode,
-            address: req.body.address,
-            latitude: req.body.latitude,
-            longitude: req.body.longitude,
-            society_profile_img_path: imagePaths["society_profile_img_path"],
-            society_profile_img_name: imageNames["society_profile_img_path"],
-            modified_by: userId,
-            modified_ip_address: req.ip,
-            modified_type: societyType || userType
-        }, {
-            where: { id: societyId }
-        });
+    if (SocietyemailExists || CompanyemailExists) {
+      return res.status(400).json({ status: 400, message: "Email already exists" });
+    }
 
+    if (SocietymobileExists || CompanymobileExists) {
+      return res.status(400).json({ status: 400, message: "Mobile number already exists" });
+    }
 
-        await profile.update({
-            // society_id: user.id,
-            society_id: societyId,
-            society_user_id:user_id,
-            number_of_flat: req.body.number_of_flat,
-            society_email: req.body.society_email,
-            whatsapp_group_name: req.body.whatsapp_group_name,
-            number_of_members:req.body.number_of_members,
-            society_whatsapp_img_path: imagePaths["society_whatsapp_img_path"],
-            society_whatsapp_img_name: imageNames["society_whatsapp_img_path"],
-            address_line_1: req.body.address_line_1,
-            address_line_2: req.body.address_line_2,
-            account_holder_name: req.body.account_holder_name,
-            bank_name: req.body.bank_name,
-            account_no: req.body.account_no,
-            branch_name: req.body.branch_name,
-            bank_ifsc_code: req.body.bank_ifsc_code,
-            billing_address_line_1: req.body.billing_address_line_1,
-            billing_address_line_2: req.body.billing_address_line_2,
-            society_profile_img_1_path: updatedFields.society_profile_img_1_path || profile.society_profile_img_1_path,
-            society_profile_img_2_path: updatedFields.society_profile_img_2_path || profile.society_profile_img_2_path,
-            society_profile_img_3_path: updatedFields.society_profile_img_3_path || profile.society_profile_img_3_path,
-            society_profile_img_4_path: updatedFields.society_profile_img_4_path || profile.society_profile_img_4_path,
-            society_profile_img_5_path: updatedFields.society_profile_img_5_path || profile.society_profile_img_5_path,
-            society_profile_img_1_name: updatedFields.society_profile_img_1_name || profile.society_profile_img_1_name,
-            society_profile_img_2_name: updatedFields.society_profile_img_2_name || profile.society_profile_img_2_name,
-            society_profile_img_3_name: updatedFields.society_profile_img_3_name || profile.society_profile_img_3_name,
-            society_profile_img_4_name: updatedFields.society_profile_img_4_name || profile.society_profile_img_4_name,
-            society_profile_img_5_name: updatedFields.society_profile_img_5_name || profile.society_profile_img_5_name,
-        
-            pan_card_path: imagePaths["pan_card_path"],
-            pan_card_name: imageNames["pan_card_path"],
-            gst_certificate_path: imagePaths["gst_certificate_path"],
-            gst_certificate_name: imageNames["gst_certificate_path"],
-            other_document_path: imagePaths["other_document_path"],
-            other_document_name: imageNames["other_document_path"],
-            google_page_url: req.body.google_page_url || '',
-            // ads_per_day: req.body.ads_per_day,
-            ads_per_day: req.body.ads_per_day === '' || req.body.ads_per_day === 'null'
-            ? null
-            : Number(req.body.ads_per_day), 
-            modified_ip_address: req.ip,
-            modified_by: userId,
-            modified_type: societyType || userType,
-            status: 'active'
-        });
+    // ✅ Safe number conversion helper
+    const safeNumber = (val) => {
+      if (val === '' || val === null || val === undefined || val === 'null') return null;
+      const num = Number(val);
+      return isNaN(num) ? null : num;
+    };
 
-        const slots = JSON.parse(req.body.ads_slot) || [];
+    // ✅ Update society registration
+    const society_registrations = await Society_Registration.update({
+      society_name: req.body.society_name,
+      name: req.body.name,
+      society_user_id: user_id,
+      mobile_number: req.body.mobile_number,
+      email: req.body.email,
+      city_id: req.body.city_id,
+      area_id,
+      pincode: safeNumber(req.body.pincode),
+      address: req.body.address,
+      latitude: safeNumber(req.body.latitude),
+      longitude: safeNumber(req.body.longitude),
+      society_profile_img_path: imagePaths["society_profile_img_path"],
+      society_profile_img_name: imageNames["society_profile_img_path"],
+      modified_by: userId,
+      modified_ip_address: req.ip,
+      modified_type: societyType || userType
+    }, {
+      where: { id: societyId }
+    });
 
-        console.log('slots', slots);
-        
-        const savedSlots = [];
+    // ✅ Update society profile
+    await profile.update({
+      society_id: societyId,
+      society_user_id: user_id,
+      number_of_flat: safeNumber(req.body.number_of_flat),
+      number_of_members: safeNumber(req.body.number_of_members),
+      society_email: req.body.society_email,
+      whatsapp_group_name: req.body.whatsapp_group_name,
+      society_whatsapp_img_path: imagePaths["society_whatsapp_img_path"],
+      society_whatsapp_img_name: imageNames["society_whatsapp_img_path"],
+      address_line_1: req.body.address_line_1,
+      address_line_2: req.body.address_line_2,
+      account_holder_name: req.body.account_holder_name,
+      bank_name: req.body.bank_name,
+      account_no: req.body.account_no,
+      branch_name: req.body.branch_name,
+      bank_ifsc_code: req.body.bank_ifsc_code,
+      billing_address_line_1: req.body.billing_address_line_1,
+      billing_address_line_2: req.body.billing_address_line_2,
+      society_profile_img_1_path: updatedFields.society_profile_img_1_path || profile.society_profile_img_1_path,
+      society_profile_img_2_path: updatedFields.society_profile_img_2_path || profile.society_profile_img_2_path,
+      society_profile_img_3_path: updatedFields.society_profile_img_3_path || profile.society_profile_img_3_path,
+      society_profile_img_4_path: updatedFields.society_profile_img_4_path || profile.society_profile_img_4_path,
+      society_profile_img_5_path: updatedFields.society_profile_img_5_path || profile.society_profile_img_5_path,
+      society_profile_img_1_name: updatedFields.society_profile_img_1_name || profile.society_profile_img_1_name,
+      society_profile_img_2_name: updatedFields.society_profile_img_2_name || profile.society_profile_img_2_name,
+      society_profile_img_3_name: updatedFields.society_profile_img_3_name || profile.society_profile_img_3_name,
+      society_profile_img_4_name: updatedFields.society_profile_img_4_name || profile.society_profile_img_4_name,
+      society_profile_img_5_name: updatedFields.society_profile_img_5_name || profile.society_profile_img_5_name,
+      pan_card_path: imagePaths["pan_card_path"],
+      pan_card_name: imageNames["pan_card_path"],
+      gst_certificate_path: imagePaths["gst_certificate_path"],
+      gst_certificate_name: imageNames["gst_certificate_path"],
+      other_document_path: imagePaths["other_document_path"],
+      other_document_name: imageNames["other_document_path"],
+      google_page_url: req.body.google_page_url || '',
+      ads_per_day: safeNumber(req.body.ads_per_day),
+      modified_ip_address: req.ip,
+      modified_by: userId,
+      modified_type: societyType || userType,
+      status: 'active'
+    });
 
-        if (slots.length === 0) {
-    // No new slots – delete all existing active slots for the society
-    await Ads_Slot.update(
+    // ✅ Handle ads slots
+    const slots = JSON.parse(req.body.ads_slot || '[]');
+    const savedSlots = [];
+
+    if (slots.length === 0) {
+      await Ads_Slot.update(
         {
-            status: 'delete',
-            modified_by: userId,
-            modified_type: societyType || userType,
+          status: 'delete',
+          modified_by: userId,
+          modified_type: societyType || userType,
         },
         {
-            where: {
-                society_id: societyId,
-                status: 'active',
-            },
+          where: {
+            society_id: societyId,
+            status: 'active',
+          },
         }
-    );
-} else {
-    // New slots provided – process them
-    for (const slot of slots) {
+      );
+    } else {
+      for (const slot of slots) {
         if (slot.is_checked) {
-            const { days, from_time, to_time } = slot;
-
-            // Soft delete existing active slot for same day
-            await Ads_Slot.update(
-                {
-                    status: 'delete',
-                    modified_by: userId,
-                    modified_type: societyType || userType,
-                },
-                {
-                    where: {
-                        society_id: societyId,
-                        days: days,
-                        status: 'active',
-                    },
-                }
-            );
-
-            const savedSlot = await Ads_Slot.create({
+          const { days, from_time, to_time } = slot;
+          await Ads_Slot.update(
+            {
+              status: 'delete',
+              modified_by: userId,
+              modified_type: societyType || userType,
+            },
+            {
+              where: {
                 society_id: societyId,
-                society_user_id: user_id,
-                days: days,
-                from_time: from_time,
-                to_time: to_time,
-                is_checked: true,
-                created_by: userId,
-                created_ip_address: req.ip,
+                days,
                 status: 'active',
-                created_type: societyType || userType,
-            });
-
-            savedSlots.push(savedSlot);
+              },
+            }
+          );
+          const savedSlot = await Ads_Slot.create({
+            society_id: societyId,
+            society_user_id: user_id,
+            days,
+            from_time,
+            to_time,
+            is_checked: true,
+            created_by: userId,
+            created_ip_address: req.ip,
+            status: 'active',
+            created_type: societyType || userType,
+          });
+          savedSlots.push(savedSlot);
         }
+      }
     }
-}
 
-        return res.status(200).json({
-            status: 200,
-            message: "Society details updated successfully",
-            data: { society_registration:society_registrations , society_profile: profile, slot:savedSlots }
-        });
-    } catch (error) {
-        console.error(error);
-        return res.status(500).json({ status: 500, message: "Internal Server Error", error: error.message  });
-    }
+    return res.status(200).json({
+      status: 200,
+      message: "Society details updated successfully",
+      data: {
+        society_registration: society_registrations,
+        society_profile: profile,
+        slot: savedSlots
+      }
+    });
+
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      status: 500,
+      message: "Internal Server Error",
+      error: error.message
+    });
+  }
 };
+
+
+// exports.societyRegistrationUpdateImage = async (req, res) => {
+    
+//     try {
+       
+//            let societyId = null;
+//            let societyUserId = null;
+//            let societyType = null;
+//            let societyUserType = null;
+       
+//            let userId = req.user.id;
+//            let userType = req.user_type;
+//             let user_id = null;
+       
+//            if (userType === 'Society_Admin') {
+//              societyId = userId;
+//             //  societyType = userType;
+//              societyType = 'Society_Admin';
+//            } else if (userType === 'Society_User') {
+//              user_id = userId;
+//             //  societyUserType = userType;
+//               societyType = 'Society_User';
+
+//              const societyUser = await Society_User.findOne({ where: { id: societyUserId } });
+//              societyId = societyUser.society_id;
+//            }
+
+//         if (!societyId) {
+//             return res.status(404).json({ status: 404, message: "User not found or invalid token" });
+//         }
+
+//           const check_edit = await Society_Registration.findOne({ where:{ id: societyId } });
+            
+//        if (check_edit.kyc_status === 'approved') {
+//                 if (!check_edit.allow_edit) {
+//                     return res.status(403).json({
+//                         status: 403,
+//                         message: "Allow edit permission for admin."
+//                     });
+//                 }
+//         }
+
+//         let profile = await Society_Profile.findOne({ where: { society_id: societyId } });
+
+//         // If profile does not exist, return an error
+//         if (!profile) {
+//             return res.status(404).json({ status: 404, message: "Society profile not found, please create first" });
+//         }
+
+//         // Required field validation
+//         const requiredFields = {
+//             society_name: "Society name is required",
+//             name: "Name is required",
+//             mobile_number: "Mobile number is required",
+//             email: "Email is required",
+//             city_id: "City is required",
+//             pincode: "Pincode is required",
+//             address: "Address is required",
+//         };
+
+//         for (let field in requiredFields) {
+//             if (!req.body[field]) {
+//                 return res.status(400).json({ status: 400, message: requiredFields[field] });
+//             }
+//         }
+
+//         console.log('files', req.files['society_profile_img_1_5_path']);
+        
+//             // Get newly uploaded images
+//         let uploadedImages = req.files['society_profile_img_1_5_path'] || [];
+//         let image_1_5_Paths = uploadedImages.map(file => `uploads/${file.filename}`);
+//         let image_1_5_Names = uploadedImages.map(file => file.filename);
+
+//         let updatedFields = {};
+
+//         if (!profile.society_profile_img_1_path && image_1_5_Paths.length > 0) {
+//             updatedFields.society_profile_img_1_path = image_1_5_Paths.shift();
+//             updatedFields.society_profile_img_1_name = image_1_5_Names.shift();
+//         }
+//         if (!profile.society_profile_img_2_path && image_1_5_Paths.length > 0) {
+//             updatedFields.society_profile_img_2_path = image_1_5_Paths.shift();
+//             updatedFields.society_profile_img_2_name = image_1_5_Names.shift();
+//         }
+//         if (!profile.society_profile_img_3_path && image_1_5_Paths.length > 0) {
+//             updatedFields.society_profile_img_3_path = image_1_5_Paths.shift();
+//             updatedFields.society_profile_img_3_name = image_1_5_Names.shift();
+//         }
+//         if (!profile.society_profile_img_4_path && image_1_5_Paths.length > 0) {
+//             updatedFields.society_profile_img_4_path = image_1_5_Paths.shift();
+//             updatedFields.society_profile_img_4_name = image_1_5_Names.shift();
+//         }
+//         if (!profile.society_profile_img_5_path && image_1_5_Paths.length > 0) {
+//             updatedFields.society_profile_img_5_path = image_1_5_Paths.shift();
+//             updatedFields.society_profile_img_5_name = image_1_5_Names.shift();
+//         }
+
+//         // Handle multiple images dynamically
+//         const imageFields = [
+//             "society_profile_img_path",
+//             "society_whatsapp_img_path",
+//             "pan_card_path",
+//             "gst_certificate_path",
+//             "other_document_path"
+//         ];
+        
+//         let imagePaths = {};
+//         let imageNames = {};
+
+//         imageFields.forEach(field => {
+//             if (req.files[field] && req.files[field][0]) {
+//                 imagePaths[field] = `uploads/${req.files[field][0].filename}`;
+//                 imageNames[field] = path.basename(req.files[field][0].filename);
+//             }
+//         });
+
+//         // Determine if PAN card path is missing or required
+//         const isPanCardRequired = 
+//         !profile || // profile doesn't exist
+//         !profile.pan_card_path || profile.pan_card_path === ""; // or pan_card_path is empty
+
+//         // Validate PAN card file if required
+//         if (isPanCardRequired && (!req.files["pan_card_path"] || !req.files["pan_card_path"][0])) {
+//         return res.status(400).json({ status: 400, error: "PAN card is required." });
+//         }
+
+//         // Validate city
+//         const city = await City.findByPk(req.body.city_id);
+//         if (!city) {
+//             return res.status(404).json({ status: 404, message: "City not found" });
+//         }
+
+//         // Handle area_id
+//         let area_id = req.body.area_id;
+//         if (!area_id && req.body.area_name) {
+//             const existingArea = await Area.findOne({ where: { area_name: req.body.area_name, city_id: req.body.city_id } });
+//             area_id = existingArea ? existingArea.id : (await Area.create({ city_id: req.body.city_id, area_name: req.body.area_name, status: 'active', created_ip_address: req.ip })).id;
+//         }
+//         if (!area_id) {
+//             return res.status(400).json({ status: 400, message: "Area Name is required" });
+//         }
+//             // Run all queries in parallel using Promise.all()
+//         const [SocietyemailExists, SocietymobileExists, CompanyemailExists, CompanymobileExists] = await Promise.all([
+//             Society_Registration.findOne({ where: { email: req.body.email, id: { [Op.ne]: societyId }, status: { [Op.ne]: 'delete' } } }),
+//             Society_Registration.findOne({ where: { mobile_number: req.body.mobile_number, id: { [Op.ne]: societyId }, status: { [Op.ne]: 'delete' } } }),
+//             Company_Registration.findOne({ where: { email: req.body.email, id: { [Op.ne]: societyId }, status: { [Op.ne]: 'delete' } } }),
+//             Company_Registration.findOne({ where: { mobile_number: req.body.mobile_number, id: { [Op.ne]: societyId }, status: { [Op.ne]: 'delete' } } })
+//         ]);
+
+//         if (SocietyemailExists || CompanyemailExists) {
+//             return res.status(400).json({ status: 400, message: "Email already exists" });
+//         }
+
+//         if (SocietymobileExists || CompanymobileExists) {
+//             return res.status(400).json({ status: 400, message: "Mobile number already exists" });
+//         }
+//         // Update society registration
+//      const society_registrations = await Society_Registration.update({
+//             society_name: req.body.society_name,
+//             name: req.body.name,
+//             society_user_id:user_id,
+//             mobile_number: req.body.mobile_number,
+//             email: req.body.email,
+//             city_id: req.body.city_id,
+//             area_id,
+            
+//             pincode: req.body.pincode,
+//             address: req.body.address,
+//             latitude: req.body.latitude,
+//             longitude: req.body.longitude,
+//             society_profile_img_path: imagePaths["society_profile_img_path"],
+//             society_profile_img_name: imageNames["society_profile_img_path"],
+//             modified_by: userId,
+//             modified_ip_address: req.ip,
+//             modified_type: societyType || userType
+//         }, {
+//             where: { id: societyId }
+//         });
+
+
+//         await profile.update({
+//             // society_id: user.id,
+//             society_id: societyId,
+//             society_user_id:user_id,
+//             number_of_flat: req.body.number_of_flat,
+//             society_email: req.body.society_email,
+//             whatsapp_group_name: req.body.whatsapp_group_name,
+//             number_of_members:req.body.number_of_members,
+//             society_whatsapp_img_path: imagePaths["society_whatsapp_img_path"],
+//             society_whatsapp_img_name: imageNames["society_whatsapp_img_path"],
+//             address_line_1: req.body.address_line_1,
+//             address_line_2: req.body.address_line_2,
+//             account_holder_name: req.body.account_holder_name,
+//             bank_name: req.body.bank_name,
+//             account_no: req.body.account_no,
+//             branch_name: req.body.branch_name,
+//             bank_ifsc_code: req.body.bank_ifsc_code,
+//             billing_address_line_1: req.body.billing_address_line_1,
+//             billing_address_line_2: req.body.billing_address_line_2,
+//             society_profile_img_1_path: updatedFields.society_profile_img_1_path || profile.society_profile_img_1_path,
+//             society_profile_img_2_path: updatedFields.society_profile_img_2_path || profile.society_profile_img_2_path,
+//             society_profile_img_3_path: updatedFields.society_profile_img_3_path || profile.society_profile_img_3_path,
+//             society_profile_img_4_path: updatedFields.society_profile_img_4_path || profile.society_profile_img_4_path,
+//             society_profile_img_5_path: updatedFields.society_profile_img_5_path || profile.society_profile_img_5_path,
+//             society_profile_img_1_name: updatedFields.society_profile_img_1_name || profile.society_profile_img_1_name,
+//             society_profile_img_2_name: updatedFields.society_profile_img_2_name || profile.society_profile_img_2_name,
+//             society_profile_img_3_name: updatedFields.society_profile_img_3_name || profile.society_profile_img_3_name,
+//             society_profile_img_4_name: updatedFields.society_profile_img_4_name || profile.society_profile_img_4_name,
+//             society_profile_img_5_name: updatedFields.society_profile_img_5_name || profile.society_profile_img_5_name,
+        
+//             pan_card_path: imagePaths["pan_card_path"],
+//             pan_card_name: imageNames["pan_card_path"],
+//             gst_certificate_path: imagePaths["gst_certificate_path"],
+//             gst_certificate_name: imageNames["gst_certificate_path"],
+//             other_document_path: imagePaths["other_document_path"],
+//             other_document_name: imageNames["other_document_path"],
+//             google_page_url: req.body.google_page_url || '',
+//             // ads_per_day: req.body.ads_per_day,
+//             ads_per_day: req.body.ads_per_day === '' || req.body.ads_per_day === 'null'
+//             ? null
+//             : Number(req.body.ads_per_day), 
+//             modified_ip_address: req.ip,
+//             modified_by: userId,
+//             modified_type: societyType || userType,
+//             status: 'active'
+//         });
+
+//         const slots = JSON.parse(req.body.ads_slot) || [];
+
+//         console.log('slots', slots);
+        
+//         const savedSlots = [];
+
+//         if (slots.length === 0) {
+//     // No new slots – delete all existing active slots for the society
+//     await Ads_Slot.update(
+//         {
+//             status: 'delete',
+//             modified_by: userId,
+//             modified_type: societyType || userType,
+//         },
+//         {
+//             where: {
+//                 society_id: societyId,
+//                 status: 'active',
+//             },
+//         }
+//     );
+// } else {
+//     // New slots provided – process them
+//     for (const slot of slots) {
+//         if (slot.is_checked) {
+//             const { days, from_time, to_time } = slot;
+
+//             // Soft delete existing active slot for same day
+//             await Ads_Slot.update(
+//                 {
+//                     status: 'delete',
+//                     modified_by: userId,
+//                     modified_type: societyType || userType,
+//                 },
+//                 {
+//                     where: {
+//                         society_id: societyId,
+//                         days: days,
+//                         status: 'active',
+//                     },
+//                 }
+//             );
+
+//             const savedSlot = await Ads_Slot.create({
+//                 society_id: societyId,
+//                 society_user_id: user_id,
+//                 days: days,
+//                 from_time: from_time,
+//                 to_time: to_time,
+//                 is_checked: true,
+//                 created_by: userId,
+//                 created_ip_address: req.ip,
+//                 status: 'active',
+//                 created_type: societyType || userType,
+//             });
+
+//             savedSlots.push(savedSlot);
+//         }
+//     }
+// }
+
+//         return res.status(200).json({
+//             status: 200,
+//             message: "Society details updated successfully",
+//             data: { society_registration:society_registrations , society_profile: profile, slot:savedSlots }
+//         });
+//     } catch (error) {
+//         console.error(error);
+//         return res.status(500).json({ status: 500, message: "Internal Server Error", error: error.message  });
+//     }
+// };
 
 exports.deleteSocietyProfileImage = async (req, res) => {
     try {

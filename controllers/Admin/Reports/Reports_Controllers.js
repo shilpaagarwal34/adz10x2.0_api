@@ -90,7 +90,8 @@ exports.totalSocietiesReportDataTable = async (req, res) => {
           });
 
           const manager = await Master_Admin.findOne({
-               where: { id:item.relationship_manager_id },
+            //    where: { id:item.relationship_manager_id },
+               where: { id: item.relationship_manager_id, status: { [Op.ne]: 'delete' } },
                attributes: ['id','user_name'],
                raw:true
           });
@@ -245,7 +246,8 @@ exports.totalCompanyReportDataTable = async (req, res) => {
             const relationshipManagerId = parseInt(item.relationship_manager_id);
             const manager = Number.isInteger(relationshipManagerId)
                 ? await Master_Admin.findOne({
-                    where: { id: relationshipManagerId },
+                    // where: { id: relationshipManagerId },
+                    where: { id: relationshipManagerId, status: { [Op.ne]: 'delete' } },
                     attributes: ['id', 'user_name'],
                     raw: true
                 })

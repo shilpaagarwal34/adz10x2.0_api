@@ -491,53 +491,6 @@ exports.login = async (req, res) => {
         let profileImageKey = null;
         let modelType = null;
 
-        // // 1. Check Society_Registration
-        // let tempUser = await Society_Registration.findOne({ where: { email, status: 'active' } });
-        // if (tempUser && await bcrypt.compare(password, tempUser.password)) {
-        //     user = tempUser;
-        //     userType = 'Society_Admin';
-        //     profileImageKey = 'society_profile_img_path';
-        //     modelType = Society_Registration;
-        // }
-
-        // // 2. Check Company_Registration
-        // if (!user) {
-        //     tempUser = await Company_Registration.findOne({ where: { email, status: 'active' } });
-        //     if (tempUser && await bcrypt.compare(password, tempUser.password)) {
-        //         user = tempUser;
-        //         userType = 'Company_Admin';
-        //         profileImageKey = 'company_profile_photo_path';
-        //         modelType = Company_Registration;
-        //     }
-        // }
-
-        // // 3. Check Society_User
-        // if (!user) {
-        //     tempUser = await Society_User.findOne({ where: { email, status: 'active' } });
-        //     if (tempUser && await bcrypt.compare(password, tempUser.password)) {
-        //         user = tempUser;
-        //         userType = 'Society_User';
-        //         profileImageKey = 'society_profile_img_path';
-        //         modelType = Society_User;
-        //     }
-        // }
-
-        // // 4. Check Company_User
-        // if (!user) {
-        //     tempUser = await Company_User.findOne({ where: { email, status: 'active' } });
-        //     if (tempUser && await bcrypt.compare(password, tempUser.password)) {
-        //         user = tempUser;
-        //         userType = 'Company_User';
-        //         profileImageKey = 'company_profile_img_path';
-        //         modelType = Company_User;
-        //     }
-        // }
-
-        // if (!user) {
-        //     return res.status(401).json({ status: 401, message: "Invalid Credentials" });
-        // }
-
-
           // Helper function to validate user
         const validateUser = async (model, emailField, profileKey, typeName) => {
             const tempUser = await model.findOne({
@@ -742,7 +695,7 @@ exports.login = async (req, res) => {
                     is_otp_verified: user.is_otp_verified,
                     token: user.token,
                     id: user.id,
-                    otp
+                    otp:""
                 });
             }
         }
@@ -1127,13 +1080,83 @@ exports.forgotPassword = async (req, res) => {
             status: 200,
             message: "OTP sent to your email",
             email: email,
-            otp:otp,
+            otp:"",
             token:user.token
         });
 
     } catch (error) {
         console.error("Error in forgot password:", error);
         return res.status(500).json({ status: 500, message: "Internal Server Error" });
+    }
+};
+
+exports.sendContactEnquiryMail = async (req, res) => {
+    try {
+        const { name, email, subject, message } = req.body;
+
+        if (!name || !email || !subject || !message) {
+            return res.status(400).json({
+                status: 400,
+                message: "All fields are required"
+            });
+        }
+
+        const baseUrl = process.env.BASE_URL;
+        const logoUrl = `${baseUrl}/assets/adz10x-logo.png`;
+
+        const emailParams = {
+            Source: process.env.AWS_SES_EMAIL,
+            Destination: {
+                ToAddresses: [process.env.CONTACT_RECEIVER_EMAIL] // admin email
+            },
+            Message: {
+                Subject: {
+                    Data: "Contact / Enquiry Form Submission - Website"
+                },
+                Body: {
+                    Html: {
+                        Data: `
+                        <div style="max-width:600px; margin:0 auto; font-family:sans-serif; background:#f2f2f2; padding:20px;">
+                            <div style="background:#cce0ff; padding:20px; text-align:center;">
+                                <img src="${logoUrl}" alt="ADZ10X Logo" style="height:60px;">
+                            </div>
+
+                            <div style="background:#fff; padding:30px;">
+                                <h2>New Contact / Enquiry</h2>
+
+                                <p><strong>Name:</strong> ${name}</p>
+                                <p><strong>Email:</strong> ${email}</p>
+                                <p><strong>Subject:</strong> ${subject}</p>
+
+                                <hr>
+
+                                <p><strong>Message:</strong></p>
+                                <p style="white-space:pre-line;">${message}</p>
+                            </div>
+
+                            <div style="background:#cce0ff; padding:15px; text-align:center;">
+                                <a href="https://www.adz10x.com">www.adz10x.com</a>
+                            </div>
+                        </div>
+                        `
+                    }
+                }
+            }
+        };
+
+        await ses.sendEmail(emailParams).promise();
+
+        return res.status(200).json({
+            status: 200,
+            message: "Enquiry sent successfully"
+        });
+
+    } catch (error) {
+        console.error("Contact enquiry mail error:", error);
+        return res.status(500).json({
+            status: 500,
+            message: "Failed to send enquiry"
+        });
     }
 };
 
@@ -1565,7 +1588,7 @@ exports.resendOTP = async (req, res) => {
             status: 200,
             message: "OTP resent successfully",
             data: {
-                otp,
+                otp:"",
                 email: user.email,
                 name: user.name,
                 user_type: user.user_type

@@ -398,7 +398,8 @@ exports.paymentsWithdrawalAdminDataTable = async (req, res) => {
         // Get admin info
         const adminMap = {};
         const admins = await Society_Registration.findAll({
-            where: { id: adminIds },
+            // where: { id: adminIds },
+            where: { id: adminIds, status: { [Op.ne]: 'delete' } }, 
             attributes: ['id', 'name', 'society_name', 'mobile_number']
         });
         admins.forEach(admin => {
@@ -411,12 +412,14 @@ exports.paymentsWithdrawalAdminDataTable = async (req, res) => {
 
         // Get user info and their societies
         const users = await Society_User.findAll({
-            where: { id: userIds },
+            // where: { id: userIds },
+            where: { id: userIds, status: { [Op.ne]: 'delete' } },
             attributes: ['id', 'society_id']
         });
 
         const societies = await Society_Registration.findAll({
-            where: { id: societyIds },
+            // where: { id: societyIds },
+            where: { id: societyIds, status: { [Op.ne]: 'delete' } },
             attributes: ['id', 'name', 'society_name', 'mobile_number']
         });
 
@@ -487,7 +490,6 @@ exports.paymentsWithdrawalAdminDataTable = async (req, res) => {
 };
 
 
-
 exports.paymentsWithdrawalByIdAdmin = async (req, res) => {
     try {
         const { id } = req.params;
@@ -517,6 +519,7 @@ exports.paymentsWithdrawalByIdAdmin = async (req, res) => {
         if (withdraw.created_type === 'Society_Admin') {
             const admin = await Society_Registration.findOne({
                 where: { id: withdraw.created_by },
+                status: { [Op.ne]: 'delete' },
                 attributes: ['name','society_name','address','society_profile_img_path']
             });
     
@@ -530,12 +533,14 @@ exports.paymentsWithdrawalByIdAdmin = async (req, res) => {
         } else if (withdraw.created_type === 'Society_User') {
             const user = await Society_User.findOne({
                 where: { id: withdraw.created_by },
+                status: { [Op.ne]: 'delete' },
                 attributes: ['society_id']
             });
 
             if (user) {
                 const society = await Society_Registration.findOne({
                     where: { id: user.society_id },
+                    status: { [Op.ne]: 'delete' },
                     attributes: ['name','society_name','address','society_profile_img_path']
                 });
                 if (society){
