@@ -70,7 +70,7 @@ app.get('/download/:filename', (req, res) => {
 });
 
 //  Host and Port
-const HOST = process.env.HOST || '192.168.0.239';
+const HOST = process.env.HOST || '0.0.0.0';
 const PORT = process.env.PORT || 3000;
 
 //  Sync database and start server
