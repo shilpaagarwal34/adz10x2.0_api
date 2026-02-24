@@ -57,6 +57,19 @@ AWS.config.update({
 
  exports.societyRegistration = async (req, res) => {
     try {
+        const generateUniqueSocietyOtp = async () => {
+            let generatedOtp;
+            let isOtpUnique = false;
+            while (!isOtpUnique) {
+                generatedOtp = Math.floor(100000 + Math.random() * 900000);
+                const existingOtp = await Society_Registration.findOne({ where: { otp: generatedOtp } });
+                if (!existingOtp) {
+                    isOtpUnique = true;
+                }
+            }
+            return generatedOtp;
+        };
+
         const requiredFields = {
             society_name: "Society name is required",
             name: "Name is required",
@@ -127,23 +140,55 @@ AWS.config.update({
           });
 
 
-        if (emailExists) {
-            return res.status(400).json({ status: 400, message: "Email already exists" });
-        }
-        if (mobileExists) {
-            return res.status(400).json({ status: 400, message: "Mobile number already exists" });
+        // If the same pending (unverified) account exists, continue OTP flow instead of blocking.
+        if (emailExists || mobileExists) {
+            const sameRecord = emailExists && mobileExists
+                ? (emailExists.id === mobileExists.id ? emailExists : null)
+                : (emailExists || mobileExists);
+
+            if (sameRecord && String(sameRecord.is_otp_verified) === '0') {
+                const pendingOtp = await generateUniqueSocietyOtp();
+                const pendingToken = sameRecord.token || jwt.sign(
+                    { email: sameRecord.email, id: sameRecord.id, userType: 'Society_Admin' },
+                    process.env.JWT_SECRET,
+                    { expiresIn: '7d' }
+                );
+
+                await sameRecord.update({
+                    token: pendingToken,
+                    otp: pendingOtp,
+                    society_name,
+                    name,
+                    city_id,
+                    area_id,
+                    pincode,
+                    address,
+                    latitude,
+                    longitude,
+                    is_agree_terms_condition
+                });
+
+                return res.status(200).json({
+                    status: 200,
+                    message: "Account already exists but is pending verification. Continue with OTP verification and use resend OTP if needed.",
+                    data: {
+                        token: pendingToken,
+                        user_type: 'Society_Admin',
+                        is_otp_verified: '0'
+                    }
+                });
+            }
+
+            if (emailExists) {
+                return res.status(400).json({ status: 400, message: "Email already exists" });
+            }
+            if (mobileExists) {
+                return res.status(400).json({ status: 400, message: "Mobile number already exists" });
+            }
         }
 
-          // Generate a unique 6-digit OTP
-          let otp;
-          let isOtpUnique = false;
-          while (!isOtpUnique) {
-              otp = Math.floor(100000 + Math.random() * 900000); // Generates a 6-digit random number
-              const existingOtp = await Society_Registration.findOne({ where: { otp } });
-              if (!existingOtp) {
-                  isOtpUnique = true; // Ensure OTP is unique
-              }
-          }
+        // Generate a unique 6-digit OTP
+        const otp = await generateUniqueSocietyOtp();
               // Extract the part before '@' from the email
         const emailPrefix = email.split('@')[0];
 
@@ -307,21 +352,15 @@ AWS.config.update({
         };
         
         // working code without whatsapp start
+        let otpEmailSent = true;
+        let otpEmailError = null;
         try {
             const response = await ses.sendEmail(emailParams).promise();
             console.log("Email sent successfully:", response);
         } catch (emailError) {
+            otpEmailSent = false;
+            otpEmailError = emailError.message;
             console.error("Failed to send email:", emailError.message);
-
-            // // Rollback: Delete newly created society and profile
-            // await Society_Profile.destroy({ where: { society_id: newSociety.id } });
-            // await Society_Registration.destroy({ where: { id: newSociety.id } });
-
-            return res.status(500).json({
-                status: 500,
-                message: "Registration failed: Unable to send verification email.",
-                error: emailError.message
-            });
         }
         // working code without whatsapp end
 
@@ -392,12 +431,16 @@ AWS.config.update({
 
         return res.status(201).json({
             status: 201,
-            message: "Society registered successfully. Please check your email for login details.",
+            message: otpEmailSent
+                ? "Society registered successfully. Please check your email for login details."
+                : "Society registered, but OTP email delivery is delayed. Please continue with OTP verification and use resend OTP.",
             data: {
                 token,
                 // otp:"",
                 notification,
-                newSocietyProfile: newSocietyProfile 
+                newSocietyProfile: newSocietyProfile,
+                otp_email_sent: otpEmailSent,
+                otp_email_error: otpEmailError
             },
         });
 
