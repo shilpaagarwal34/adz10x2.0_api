@@ -67,41 +67,37 @@ exports.getSocietyProfile = async (req, res) => {
         }
         let completion = 0;
 
-                   // 1. Basic Society Details (30%)
-           const basicDetails = [
-               user.society_name?.trim(),
-               profile.number_of_flat,
-               profile.society_email?.trim(),
-               profile.address_line_1,
-               profile.address_line_2,
-               user.society_profile_img_path?.trim()
-           ];
-           const filledBasic = basicDetails.filter(field => field !== null && field !== undefined && field !== '').length;
-           completion += (filledBasic / basicDetails.length) * 30;
+        // 1. Basic Society Details (30%) – 5 fields; profile image not required for 100%
+        const basicDetails = [
+            user.society_name?.trim(),
+            profile.number_of_flat,
+            profile.society_email?.trim(),
+            profile.address_line_1,
+            profile.address_line_2
+        ];
+        const filledBasic = basicDetails.filter(field => field !== null && field !== undefined && field !== '').length;
+        completion += (filledBasic / basicDetails.length) * 30;
 
-           // 2. Contact Information (35%)
-           const contactInfo = [
-               user.name?.trim(),
-               user.mobile_number?.trim(),
-               user.email?.trim()
-           ];
-           const filledContact = contactInfo.filter(field => field !== null && field !== undefined && field !== '').length;
-           completion += (filledContact / contactInfo.length) * 35;
+        // 2. Contact Information (35%)
+        const contactInfo = [
+            user.name?.trim(),
+            user.mobile_number?.trim(),
+            user.email?.trim()
+        ];
+        const filledContact = contactInfo.filter(field => field !== null && field !== undefined && field !== '').length;
+        completion += (filledContact / contactInfo.length) * 35;
 
-           // 3. Society Location (35%)
-           const location = [
-               user.latitude,
-               user.longitude,
-               user.address?.trim(),
-               user.city_id,
-               user.area_id,
-               user.pincode
-           ];
-           const filledLocation = location.filter(field => field !== null && field !== undefined && field !== '').length;
-           completion += (filledLocation / location.length) * 35;
+        // 3. Society Location (35%) – 4 fields; lat/lng not required for 100%
+        const location = [
+            user.address?.trim(),
+            user.city_id,
+            user.area_id,
+            user.pincode
+        ];
+        const filledLocation = location.filter(field => field !== null && field !== undefined && field !== '').length;
+        completion += (filledLocation / location.length) * 35;
 
-
-const profileCompletion = Math.round(completion);
+        const profileCompletion = Math.round(Math.min(100, completion));
 
         return res.status(200).json({
             status: 200,
@@ -209,42 +205,37 @@ exports.getSocietyProfiles = async (req, res) => {
         }
         let completion = 0;
 
-                   // 1. Basic Society Details (30%)
-           const basicDetails = [
-               user.society_name?.trim(),
-               profile.number_of_flat,
-               profile.society_email?.trim(),
-               profile.address_line_1,
-               profile.address_line_2,
-               user.society_profile_img_path?.trim()
-           ];
-           const filledBasic = basicDetails.filter(field => field !== null && field !== undefined && field !== '').length;
-           completion += (filledBasic / basicDetails.length) * 30;
+        // 1. Basic Society Details (30%) – 5 fields; profile image not required for 100%
+        const basicDetails = [
+            user.society_name?.trim(),
+            profile.number_of_flat,
+            profile.society_email?.trim(),
+            profile.address_line_1,
+            profile.address_line_2
+        ];
+        const filledBasic = basicDetails.filter(field => field !== null && field !== undefined && field !== '').length;
+        completion += (filledBasic / basicDetails.length) * 30;
 
-           // 2. Contact Information (35%)
-           const contactInfo = [
-               user.name?.trim(),
-               user.mobile_number?.trim(),
-               user.email?.trim()
-           ];
-           const filledContact = contactInfo.filter(field => field !== null && field !== undefined && field !== '').length;
-           completion += (filledContact / contactInfo.length) * 35;
+        // 2. Contact Information (35%)
+        const contactInfo = [
+            user.name?.trim(),
+            user.mobile_number?.trim(),
+            user.email?.trim()
+        ];
+        const filledContact = contactInfo.filter(field => field !== null && field !== undefined && field !== '').length;
+        completion += (filledContact / contactInfo.length) * 35;
 
-           // 3. Society Location (35%)
-           const location = [
-               user.latitude,
-               user.longitude,
-               user.address?.trim(),
-               user.city_id,
-               user.area_id,
-               user.pincode
-           ];
-           const filledLocation = location.filter(field => field !== null && field !== undefined && field !== '').length;
-           completion += (filledLocation / location.length) * 35;
+        // 3. Society Location (35%) – 4 fields; lat/lng not required for 100%
+        const location = [
+            user.address?.trim(),
+            user.city_id,
+            user.area_id,
+            user.pincode
+        ];
+        const filledLocation = location.filter(field => field !== null && field !== undefined && field !== '').length;
+        completion += (filledLocation / location.length) * 35;
 
-
-const profileCompletion = Math.round(completion);
-
+        const profileCompletion = Math.round(Math.min(100, completion));
 
         return res.status(200).json({
             status: 200,
