@@ -54,8 +54,9 @@ exports.getSocietyProfile = async (req, res) => {
             }
         });
 
-       if(userType = 'Society_User'){
-           user = await Society_Registration.findOne({ where: { id: societyId } });
+       const user = await Society_Registration.findOne({ where: { id: societyId } });
+       if (!user) {
+           return res.status(404).json({ status: 404, message: "Society registration not found" });
        }
 
          const check_edit = await Society_Registration.findOne({ where:{ id: societyId } });
@@ -71,8 +72,9 @@ exports.getSocietyProfile = async (req, res) => {
                user.society_name?.trim(),
                profile.number_of_flat,
                profile.society_email?.trim(),
-               profile.address_line_1
-            //    profile.address_line_2
+               profile.address_line_1,
+               profile.address_line_2,
+               user.society_profile_img_path?.trim()
            ];
            const filledBasic = basicDetails.filter(field => field !== null && field !== undefined && field !== '').length;
            completion += (filledBasic / basicDetails.length) * 30;
@@ -193,9 +195,11 @@ exports.getSocietyProfiles = async (req, res) => {
        //  const profile = await Society_Profile.findOne({ where: { society_id: user.id } });
        const profile = await Society_Profile.findOne({ where: { society_id: societyId } });
 
-       if(userType = 'Society_User'){
-           user = await Society_Registration.findOne({ where: { id: societyId } });
+       const userForCompletion = await Society_Registration.findOne({ where: { id: societyId } });
+       if (!userForCompletion) {
+           return res.status(404).json({ status: 404, message: "Society registration not found" });
        }
+       user = userForCompletion;
 
          const check_edit = await Society_Registration.findOne({ where:{ id: societyId } });
              
@@ -211,8 +215,8 @@ exports.getSocietyProfiles = async (req, res) => {
                profile.number_of_flat,
                profile.society_email?.trim(),
                profile.address_line_1,
-               profile.address_line_2
-
+               profile.address_line_2,
+               user.society_profile_img_path?.trim()
            ];
            const filledBasic = basicDetails.filter(field => field !== null && field !== undefined && field !== '').length;
            completion += (filledBasic / basicDetails.length) * 30;
