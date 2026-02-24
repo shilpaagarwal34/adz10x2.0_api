@@ -7,6 +7,7 @@ const Campaign_Configuration = require('@models/Admin/Master/Campaign_Configurat
 const Company_Registration = require('@models/Company/Auth/Company_Registration_Model');
 const Company_User = require('@models/Company/Users/Company_User_Model');
 const Advertisements = require('@models/Society/Advertisement/Advertisement_Model');
+const Society_Media_Rate_Card = require('@models/Society/Advertisement/Society_Media_Rate_Card_Model');
 const Master_Admin = require('@models/Admin/Auth/Master_Admin_Model');
 const Wallet = require('@models/Company/Wallet/Wallet_Model');
 const City = require('@models/Admin/Master/City_Model');
@@ -16,6 +17,107 @@ const path = require('path');
 const { where, literal, Sequelize } = require('sequelize');
 const { Op,fn, col } = require('sequelize');
 const moment = require('moment-timezone');
+const { normalizeMediaType, isValidMediaType, calculateRateBreakup } = require('@helper/mediaRateHelper');
+
+const resolveRequestedSocietyIds = (body = {}) => {
+    const ids = new Set();
+    const rawArrays = [body.society_ids, body.society_ind_ids, body["society_ids[]"], body["society_ind_ids[]"]];
+    rawArrays.forEach((arr) => {
+        if (Array.isArray(arr)) {
+            arr.forEach((id) => {
+                const num = Number(id);
+                if (!Number.isNaN(num) && num > 0) ids.add(num);
+            });
+        } else if (arr !== undefined && arr !== null) {
+            const num = Number(arr);
+            if (!Number.isNaN(num) && num > 0) ids.add(num);
+        }
+    });
+
+    Object.keys(body).forEach((key) => {
+        const textMatch = key.match(/^societies_text\[(\d+)\]$/);
+        const imageMatch = key.match(/^upload_societies_images_path\[(\d+)\]$/);
+        const match = textMatch || imageMatch;
+        if (match) {
+            const num = Number(match[1]);
+            if (!Number.isNaN(num) && num > 0) ids.add(num);
+        }
+    });
+
+    return Array.from(ids);
+};
+
+const getActiveRateCardForDate = async (societyId, mediaType, date) => {
+    const normalized = normalizeMediaType(mediaType);
+    if (!normalized || !isValidMediaType(normalized)) return null;
+
+    const targetDate = date || moment().format("YYYY-MM-DD");
+    return Society_Media_Rate_Card.findOne({
+        where: {
+            society_id: societyId,
+            media_type: normalized,
+            status: "active",
+            effective_from: { [Op.lte]: targetDate },
+            [Op.or]: [
+                { effective_to: null },
+                { effective_to: { [Op.gte]: targetDate } },
+            ],
+        },
+        order: [["effective_from", "DESC"], ["id", "DESC"]],
+    });
+};
+
+exports.getCompanySocietyMediaRateCards = async (req, res) => {
+    try {
+        const { society_id, media_type, campaign_date } = req.query;
+
+        if (!society_id) {
+            return res.status(400).json({ status: 400, message: "society_id is required" });
+        }
+
+        const whereClause = {
+            society_id: Number(society_id),
+            status: "active",
+        };
+
+        if (media_type) {
+            const normalized = normalizeMediaType(media_type);
+            if (!isValidMediaType(normalized)) {
+                return res.status(400).json({ status: 400, message: "Invalid media_type" });
+            }
+            whereClause.media_type = normalized;
+        }
+
+        if (campaign_date) {
+            whereClause[Op.and] = [
+                { effective_from: { [Op.lte]: campaign_date } },
+                {
+                    [Op.or]: [
+                        { effective_to: null },
+                        { effective_to: { [Op.gte]: campaign_date } },
+                    ],
+                },
+            ];
+        }
+
+        const cards = await Society_Media_Rate_Card.findAll({
+            where: whereClause,
+            order: [["media_type", "ASC"], ["effective_from", "DESC"]],
+        });
+
+        return res.status(200).json({
+            status: 200,
+            message: "Company media rate cards fetched successfully",
+            data: cards,
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: 500,
+            message: "Failed to fetch company media rate cards",
+            error: error.message,
+        });
+    }
+};
 
 exports.viewCampaign = async (req, res) => {
     try {
@@ -611,7 +713,8 @@ exports.getSocietiesWithinRadius = async (req, res) => {
             // campaign_date,
             campaignDate: campaign_date,   // rename here
             day,
-            radius_km
+            radius_km,
+            media_type
         } = req.body;
 
      
@@ -720,13 +823,41 @@ exports.getSocietiesWithinRadius = async (req, res) => {
                 disable_message = `Ad limit (${allowed}) reached for this society on ${campaign_date}`;
             }
 
+            let media_rate = null;
+            if (media_type && isValidMediaType(media_type)) {
+                const activeRateCard = await getActiveRateCardForDate(
+                    society.id,
+                    media_type,
+                    campaign_date
+                );
+
+                if (activeRateCard) {
+                    media_rate = {
+                        id: activeRateCard.id,
+                        media_type: activeRateCard.media_type,
+                        society_rate: Number(activeRateCard.society_rate) || 0,
+                        platform_commission_pct: Number(activeRateCard.platform_commission_pct) || 0,
+                        platform_rate: Number(activeRateCard.platform_rate) || 0,
+                        company_rate: Number(activeRateCard.company_rate) || 0,
+                        effective_from: activeRateCard.effective_from,
+                        effective_to: activeRateCard.effective_to,
+                    };
+                } else {
+                    media_rate = null;
+                    disable_message = disable_message
+                        ? `${disable_message} | Selected media slot is not offered by this society`
+                        : "Selected media slot is not offered by this society";
+                }
+            }
+
             societiesWithinRadius.push({
                 society,
                 profile,
                 used,
                 allowed,
-                disable,
-                disable_message
+                disable: disable || (media_type && !media_rate),
+                disable_message,
+                media_rate
             });
         }
 
@@ -755,7 +886,7 @@ exports.createOrUpdateCampaign = async (req, res) => {
         const {
             id, campaign_type, creative_type, lead_generation_url, survey_url, campaign_name, campaign_date,campaign_city_id, 
             campaign_area_id,campaign_address, my_ads_location_latitude, my_ads_location_longitude, radius_km,
-            search_by_google_location, brand_promotions_creative, campaign_amount, creative_text,campaign_ads_amount, campaign_status, societies_text
+            search_by_google_location, brand_promotions_creative, campaign_amount, creative_text,campaign_ads_amount, campaign_status, societies_text, media_type
         } = req.body;
 
         const userId = req.user.id;
@@ -774,6 +905,53 @@ exports.createOrUpdateCampaign = async (req, res) => {
             comapnyId = companyUser.company_id;
             comapnyUserId = companyUser.id;
         }
+
+        const normalizedMediaType = normalizeMediaType(media_type);
+        const selectedSocietyIds = resolveRequestedSocietyIds(req.body);
+        const pricingBySociety = {};
+        let resolvedCampaignAmount = Number(campaign_amount) || 0;
+
+        if (normalizedMediaType && isValidMediaType(normalizedMediaType) && selectedSocietyIds.length > 0) {
+            let runningTotal = 0;
+            for (const societyId of selectedSocietyIds) {
+                const activeRateCard = await getActiveRateCardForDate(societyId, normalizedMediaType, campaign_date);
+                const breakup = activeRateCard
+                    ? {
+                        society_rate: Number(activeRateCard.society_rate) || 0,
+                        platform_commission_pct: Number(activeRateCard.platform_commission_pct) || 0,
+                        platform_rate: Number(activeRateCard.platform_rate) || 0,
+                        company_rate: Number(activeRateCard.company_rate) || 0,
+                    }
+                    : calculateRateBreakup(0, normalizedMediaType);
+
+                pricingBySociety[societyId] = breakup;
+                runningTotal += breakup.company_rate;
+            }
+            resolvedCampaignAmount = Number(runningTotal.toFixed(2));
+        }
+
+        const buildSocietyPricingPayload = (societyId) => {
+            const pricing = pricingBySociety[Number(societyId)];
+            if (!pricing) {
+                return {
+                    campaign_ads_amount: Number(campaign_ads_amount) || 0,
+                    media_type: normalizedMediaType || null,
+                    society_rate_snapshot: null,
+                    platform_commission_pct_snapshot: null,
+                    platform_rate_snapshot: null,
+                    company_rate_snapshot: null,
+                };
+            }
+
+            return {
+                campaign_ads_amount: pricing.company_rate,
+                media_type: normalizedMediaType,
+                society_rate_snapshot: pricing.society_rate,
+                platform_commission_pct_snapshot: pricing.platform_commission_pct,
+                platform_rate_snapshot: pricing.platform_rate,
+                company_rate_snapshot: pricing.company_rate,
+            };
+        };
 
         let campaign;
         let CampaignLogs = []; // Initialize empty array to store logs
@@ -800,17 +978,17 @@ exports.createOrUpdateCampaign = async (req, res) => {
                     return res.status(400).json({ status: 400, message: 'Company not found' });
                 }
 
-                if (company.wallet_amount >= parseFloat(campaign_amount)) {
+                if (company.wallet_amount >= resolvedCampaignAmount) {
                     let previousBalance = company.wallet_amount;
-                    company.wallet_amount -= parseFloat(campaign_amount);
+                    company.wallet_amount -= resolvedCampaignAmount;
                     await company.save();
 
                     await Wallet.create({
                         company_id: comapnyId,
                         company_user_id: comapnyUserId,
                         wallet_type: "debit",
-                        amount: parseFloat(campaign_amount),
-                        total_amount: parseFloat(campaign_amount),
+                        amount: resolvedCampaignAmount,
+                        total_amount: resolvedCampaignAmount,
                         gst_percentage: 0,
                         gst_amount: 0,
                         balance: previousBalance,
@@ -839,8 +1017,9 @@ exports.createOrUpdateCampaign = async (req, res) => {
                 lead_generation_url,
                 survey_url,
                 campaign_name,
-                campaign_amount,
+                campaign_amount: resolvedCampaignAmount,
                 campaign_date,
+                media_type: normalizedMediaType || null,
                 campaign_area_id,
                 campaign_address,
                 my_ads_location_latitude,
@@ -910,6 +1089,7 @@ console.log('Step D - From upload_societies_images_path keys:', imageKeys);
 
 // ✅ Final Combined Set
 const finalUsedSocietyIds = Array.from(usedSocietyIds);
+const societyIds = [...finalUsedSocietyIds];
 console.log('✅ All collected society IDs (usedSocietyIds):', finalUsedSocietyIds);
 
 // ✅ Fetch existing logs
@@ -961,7 +1141,7 @@ if (toDeleteSocietyIds.length > 0) {
                         campaign_name,
                         campaign_date,
                         campaign_area_id,
-                        campaign_ads_amount,
+                        ...buildSocietyPricingPayload(socId),
                         my_ads_location_latitude,
                         my_ads_location_longitude,
                         radius_km,
@@ -1069,7 +1249,7 @@ if (toDeleteSocietyIds.length > 0) {
                             campaign_name,
                             campaign_date,
                             campaign_area_id,
-                            campaign_ads_amount,
+                            ...buildSocietyPricingPayload(socId),
                             my_ads_location_latitude,
                             my_ads_location_longitude,
                             radius_km,
@@ -1124,7 +1304,7 @@ if (toDeleteSocietyIds.length > 0) {
                             campaign_name,
                             campaign_date,
                             campaign_area_id,
-                            campaign_ads_amount,
+                            ...buildSocietyPricingPayload(socId),
                             my_ads_location_latitude,
                             my_ads_location_longitude,
                             radius_km,
@@ -1191,10 +1371,10 @@ if (toDeleteSocietyIds.length > 0) {
                 return res.status(400).json({ status: 400, message: 'Company not found' });
             }
 
-            if (company.wallet_amount >= parseFloat(campaign_amount)) {
+            if (company.wallet_amount >= resolvedCampaignAmount) {
                 previousBalance = company.wallet_amount;
                 // Deduct wallet balance
-                company.wallet_amount -= parseFloat(campaign_amount);
+                company.wallet_amount -= resolvedCampaignAmount;
                 await company.save();
                 shouldCreateDebit = true; // mark for later
                 finalCampaignStatus = 'pending';
@@ -1221,9 +1401,10 @@ if (toDeleteSocietyIds.length > 0) {
             creative_type,
             lead_generation_url,
             survey_url,
-            campaign_amount,
+            campaign_amount: resolvedCampaignAmount,
             campaign_name,
             campaign_date,
+            media_type: normalizedMediaType || null,
             campaign_city_id,
             campaign_area_id,
             campaign_address,
@@ -1249,8 +1430,8 @@ if (toDeleteSocietyIds.length > 0) {
                 company_id: comapnyId,
                 company_user_id: comapnyUserId,
                 wallet_type: "debit",
-                amount: parseFloat(campaign_amount),
-                total_amount: parseFloat(campaign_amount),
+                amount: resolvedCampaignAmount,
+                total_amount: resolvedCampaignAmount,
                 gst_percentage: 0,
                 gst_amount: 0,
                 balance: previousBalance,
@@ -1287,7 +1468,7 @@ if (toDeleteSocietyIds.length > 0) {
                     campaign_name,
                     campaign_date,
                     campaign_area_id,
-                    campaign_ads_amount,
+                    ...buildSocietyPricingPayload(socId),
                     my_ads_location_latitude,
                     my_ads_location_longitude,
                     radius_km,
@@ -1395,7 +1576,7 @@ if (toDeleteSocietyIds.length > 0) {
                         campaign_name,
                         campaign_date,
                         campaign_area_id,
-                        campaign_ads_amount,
+                        ...buildSocietyPricingPayload(socId),
                         my_ads_location_latitude,
                         my_ads_location_longitude,
                         radius_km,
@@ -1433,7 +1614,7 @@ if (toDeleteSocietyIds.length > 0) {
                             campaign_name,
                             campaign_date,
                             campaign_area_id,
-                            campaign_ads_amount,
+                            ...buildSocietyPricingPayload(socId),
                             my_ads_location_latitude,
                             my_ads_location_longitude,
                             radius_km,

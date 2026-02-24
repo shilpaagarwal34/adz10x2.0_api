@@ -6,6 +6,15 @@ const City = require('@models/Admin/Master/City_Model');
 const Area = require('@models/Admin/Master/Area_Model');
 const Campaign_Configuration = require('@models/Admin/Master/Campaign_Configuration_Model');
 const Ads_Slot = require('@models/Society/Auth/Society_Ads_Slot_Model');
+const Society_Media_Rate_Card = require('@models/Society/Advertisement/Society_Media_Rate_Card_Model');
+const {
+  MEDIA_TYPES,
+  isValidMediaType,
+  normalizeMediaType,
+  calculateRateBreakup,
+  getMediaPlatformConfig,
+  SOCIETY_APPENDABLE_TERMS_OPTIONS,
+} = require('@helper/mediaRateHelper');
 const { Op, where } = require("sequelize");
 const path = require('path');
 const moment = require('moment');
@@ -57,30 +66,27 @@ exports.getSocietyProfile = async (req, res) => {
         }
         let completion = 0;
 
-                   // 1. Basic Society Details (20%)
+                   // 1. Basic Society Details (30%)
            const basicDetails = [
                user.society_name?.trim(),
                profile.number_of_flat,
                profile.society_email?.trim(),
-               profile.whatsapp_group_name?.trim(),
-               profile.number_of_members,
-               profile.society_whatsapp_img_path,
                profile.address_line_1
             //    profile.address_line_2
            ];
            const filledBasic = basicDetails.filter(field => field !== null && field !== undefined && field !== '').length;
-           completion += (filledBasic / basicDetails.length) * 20;
+           completion += (filledBasic / basicDetails.length) * 30;
 
-           // 2. Contact Information (15%)
+           // 2. Contact Information (35%)
            const contactInfo = [
                user.name?.trim(),
                user.mobile_number?.trim(),
                user.email?.trim()
            ];
            const filledContact = contactInfo.filter(field => field !== null && field !== undefined && field !== '').length;
-           completion += (filledContact / contactInfo.length) * 15;
+           completion += (filledContact / contactInfo.length) * 35;
 
-           // 3. Society Location (15%)
+           // 3. Society Location (35%)
            const location = [
                user.latitude,
                user.longitude,
@@ -90,45 +96,7 @@ exports.getSocietyProfile = async (req, res) => {
                user.pincode
            ];
            const filledLocation = location.filter(field => field !== null && field !== undefined && field !== '').length;
-           completion += (filledLocation / location.length) * 15;
-
-// 4. Billing Details (20%)
-const billing = [
-   profile.account_holder_name?.trim(),
-   profile.bank_name?.trim(),
-   profile.branch_name?.trim(),
-   profile.account_no?.trim(),
-   profile.bank_ifsc_code?.trim(),
-   profile.billing_address_line_1?.trim()
-//    profile.billing_address_line_2?.trim()
-];
-const filledBilling = billing.filter(field => field !== null && field !== undefined && field !== '').length;
-completion += (filledBilling / billing.length) * 20;
-
-// 5. Society Photos & Documents (20%)
-
-const Photos = [
-   profile.society_profile_img_1_path?.trim(),
-   profile.society_profile_img_2_path?.trim(),
-   profile.society_profile_img_3_path?.trim(),
-   profile.society_profile_img_4_path?.trim(),
-   profile.society_profile_img_5_path?.trim()
-];
-const filledPhotos = Photos.filter(field => field !== null && field !== undefined && field !== '').length;
-completion += (filledPhotos / Photos.length) * 20;
-
-
-// 6. Advertisement Settings (5%)
-const ads = [
-   profile.ads_per_day
-];
-const filledAds = ads.filter(field => field !== null && field !== undefined && field !== '').length;
-completion += (filledAds / ads.length) * 5;
-
-// Add 5% if any active ad slot exists for the society
-if (anyDaySlotExists) {
-    completion += 5;
-}
+           completion += (filledLocation / location.length) * 35;
 
 
 const profileCompletion = Math.round(completion);
@@ -237,31 +205,28 @@ exports.getSocietyProfiles = async (req, res) => {
         }
         let completion = 0;
 
-                   // 1. Basic Society Details (20%)
+                   // 1. Basic Society Details (30%)
            const basicDetails = [
                user.society_name?.trim(),
                profile.number_of_flat,
                profile.society_email?.trim(),
-               profile.whatsapp_group_name?.trim(),
-               profile.number_of_members,
-               profile.society_whatsapp_img_path,
                profile.address_line_1,
                profile.address_line_2
 
            ];
            const filledBasic = basicDetails.filter(field => field !== null && field !== undefined && field !== '').length;
-           completion += (filledBasic / basicDetails.length) * 20;
+           completion += (filledBasic / basicDetails.length) * 30;
 
-           // 2. Contact Information (15%)
+           // 2. Contact Information (35%)
            const contactInfo = [
                user.name?.trim(),
                user.mobile_number?.trim(),
                user.email?.trim()
            ];
            const filledContact = contactInfo.filter(field => field !== null && field !== undefined && field !== '').length;
-           completion += (filledContact / contactInfo.length) * 15;
+           completion += (filledContact / contactInfo.length) * 35;
 
-           // 3. Society Location (15%)
+           // 3. Society Location (35%)
            const location = [
                user.latitude,
                user.longitude,
@@ -271,41 +236,8 @@ exports.getSocietyProfiles = async (req, res) => {
                user.pincode
            ];
            const filledLocation = location.filter(field => field !== null && field !== undefined && field !== '').length;
-           completion += (filledLocation / location.length) * 15;
+           completion += (filledLocation / location.length) * 35;
 
-// 4. Billing Details (20%)
-const billing = [
-   profile.account_holder_name?.trim(),
-   profile.bank_name?.trim(),
-   profile.branch_name?.trim(),
-   profile.account_no?.trim(),
-   profile.bank_ifsc_code?.trim(),
-   profile.billing_address_line_1?.trim(),
-   profile.billing_address_line_2?.trim()
-];
-const filledBilling = billing.filter(field => field !== null && field !== undefined && field !== '').length;
-completion += (filledBilling / billing.length) * 20;
-
-// 5. Society Photos & Documents (20%)
-
-const Photos = [
-   profile.society_profile_img_1_path?.trim(),
-   profile.society_profile_img_2_path?.trim(),
-   profile.society_profile_img_3_path?.trim(),
-   profile.society_profile_img_4_path?.trim(),
-   profile.society_profile_img_5_path?.trim()
-];
-const filledPhotos = Photos.filter(field => field !== null && field !== undefined && field !== '').length;
-completion += (filledPhotos / Photos.length) * 20;
-
-
-// 6. Advertisement Settings (10%)
-const ads = [
-   profile.ad_slot_timing,
-   profile.ads_per_day
-];
-const filledAds = ads.filter(field => field !== null && field !== undefined && field !== '').length;
-completion += (filledAds / ads.length) * 10;
 
 const profileCompletion = Math.round(completion);
 
@@ -396,6 +328,331 @@ exports.getSocietyProfileSlot = async (req, res) => {
         error: error.message
       });
     }
+};
+
+exports.getSocietyMediaRateCards = async (req, res) => {
+  try {
+    let societyId = null;
+
+    if (req.user_type === "Society_Admin") {
+      societyId = req.user.id;
+    } else if (req.user_type === "Society_User") {
+      const societyUser = await Society_User.findOne({ where: { id: req.user.id } });
+      societyId = societyUser?.society_id || null;
+    }
+
+    if (!societyId) {
+      return res.status(400).json({
+        status: 400,
+        message: "Society not found for current user",
+      });
+    }
+
+    const { date } = req.query;
+    const targetDate = date || new Date().toISOString().slice(0, 10);
+
+    const whereClause = {
+      society_id: societyId,
+      status: "active",
+    };
+
+    if (targetDate) {
+      whereClause[Op.and] = [
+        { effective_from: { [Op.lte]: targetDate } },
+        {
+          [Op.or]: [
+            { effective_to: null },
+            { effective_to: { [Op.gte]: targetDate } },
+          ],
+        },
+      ];
+    }
+
+    const cards = await Society_Media_Rate_Card.findAll({
+      where: whereClause,
+      order: [["media_type", "ASC"], ["effective_from", "DESC"]],
+    });
+
+    const cardsByMediaType = {};
+    cards.forEach((card) => {
+      if (!cardsByMediaType[card.media_type]) {
+        cardsByMediaType[card.media_type] = card;
+      }
+    });
+
+    const platforms = MEDIA_TYPES.map((mediaType) => {
+      const config = getMediaPlatformConfig(mediaType);
+      return {
+        media_type: mediaType,
+        duration_days: config.duration_days,
+        generic_terms: config.generic_terms,
+        society_terms_options: SOCIETY_APPENDABLE_TERMS_OPTIONS,
+        card: cardsByMediaType[mediaType] || null,
+      };
+    });
+
+    return res.status(200).json({
+      status: 200,
+      message: "Media rate cards fetched successfully",
+      media_types: MEDIA_TYPES,
+      society_terms_options: SOCIETY_APPENDABLE_TERMS_OPTIONS,
+      platforms,
+      data: cards,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      message: "Failed to fetch media rate cards",
+      error: error.message,
+    });
+  }
+};
+
+exports.upsertSocietyMediaRateCards = async (req, res) => {
+  try {
+    const allowedWhatsappDays = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+    let societyId = null;
+    let createdType = req.user_type;
+
+    if (req.user_type === "Society_Admin") {
+      societyId = req.user.id;
+    } else if (req.user_type === "Society_User") {
+      const societyUser = await Society_User.findOne({ where: { id: req.user.id } });
+      societyId = societyUser?.society_id || null;
+      createdType = "Society_User";
+    }
+
+    if (!societyId) {
+      return res.status(400).json({
+        status: 400,
+        message: "Society not found for current user",
+      });
+    }
+
+    const { cards } = req.body;
+    const submitMode = (req.body.submit_mode || "submit").toString().toLowerCase();
+    const isDraftSave = submitMode === "draft";
+    if (!Array.isArray(cards) || cards.length === 0) {
+      return res.status(400).json({
+        status: 400,
+        message: "cards array is required",
+      });
+    }
+
+    const savedCards = [];
+    const requestedMediaTypes = new Set();
+
+    for (const card of cards) {
+      const mediaType = normalizeMediaType(card.media_type);
+      const societyRate = Number(card.society_rate || 0);
+      const selectedSocietyTerms = Array.isArray(card.society_terms)
+        ? card.society_terms
+            .map((item) => item?.toString().trim())
+            .filter((item) => Boolean(item))
+        : [];
+      const effectiveFrom = card.effective_from || new Date().toISOString().slice(0, 10);
+      const effectiveTo = card.effective_to || null;
+      const incomingWhatsappDetails =
+        card.whatsapp_details && typeof card.whatsapp_details === "object"
+          ? card.whatsapp_details
+          : null;
+
+      if (!isValidMediaType(mediaType)) {
+        return res.status(400).json({
+          status: 400,
+          message: `Invalid media_type: ${card.media_type}`,
+        });
+      }
+
+      requestedMediaTypes.add(mediaType);
+
+      if (!isDraftSave && (!Number.isFinite(societyRate) || societyRate <= 0)) {
+        return res.status(400).json({
+          status: 400,
+          message: `society_rate must be greater than 0 for media_type: ${mediaType}`,
+        });
+      }
+
+      const hasInvalidTerm = selectedSocietyTerms.some(
+        (term) => !SOCIETY_APPENDABLE_TERMS_OPTIONS.includes(term)
+      );
+      if (hasInvalidTerm) {
+        return res.status(400).json({
+          status: 400,
+          message: `Invalid society terms selected for media_type: ${mediaType}`,
+        });
+      }
+
+      let normalizedWhatsappDetails = null;
+      if (mediaType === "whatsapp_promotional_day") {
+        const selectedDays = Array.isArray(incomingWhatsappDetails?.selected_days)
+          ? incomingWhatsappDetails.selected_days
+              .map((d) => (d || "").toString().trim().toLowerCase())
+              .filter((d) => allowedWhatsappDays.includes(d))
+          : [];
+        const fromTime = (incomingWhatsappDetails?.from_time || "").toString().trim();
+        const toTime = (incomingWhatsappDetails?.to_time || "").toString().trim();
+        const whatsappGroupName = (incomingWhatsappDetails?.whatsapp_group_name || "")
+          .toString()
+          .trim();
+        const whatsappImage = (incomingWhatsappDetails?.whatsapp_image || "")
+          .toString()
+          .trim();
+        const numberOfFlats = Number(incomingWhatsappDetails?.number_of_flats || 0);
+
+        if (!isDraftSave && !selectedDays.length) {
+          return res.status(400).json({
+            status: 400,
+            message: "Select at least one day for WhatsApp promotional day",
+          });
+        }
+        if (!isDraftSave && (!fromTime || !toTime)) {
+          return res.status(400).json({
+            status: 400,
+            message: "From/To time is required for WhatsApp promotional day",
+          });
+        }
+        if (!isDraftSave && !whatsappGroupName) {
+          return res.status(400).json({
+            status: 400,
+            message: "WhatsApp group name is required for WhatsApp promotional day",
+          });
+        }
+        if (!isDraftSave && !whatsappImage) {
+          return res.status(400).json({
+            status: 400,
+            message: "WhatsApp image is required for WhatsApp promotional day",
+          });
+        }
+        if (!isDraftSave && (!Number.isFinite(numberOfFlats) || numberOfFlats <= 0)) {
+          return res.status(400).json({
+            status: 400,
+            message: "Number of flats is required for WhatsApp promotional day",
+          });
+        }
+
+        normalizedWhatsappDetails = {
+          selected_days: Array.from(new Set(selectedDays)),
+          from_time: fromTime,
+          to_time: toTime,
+          whatsapp_group_name: whatsappGroupName,
+          whatsapp_image: whatsappImage,
+          number_of_flats: numberOfFlats,
+        };
+      }
+
+      const overlapCard = await Society_Media_Rate_Card.findOne({
+        where: {
+          society_id: societyId,
+          media_type: mediaType,
+          status: "active",
+          ...(card.id ? { id: { [Op.ne]: card.id } } : {}),
+          effective_from: { [Op.lte]: effectiveTo || "9999-12-31" },
+          [Op.or]: [
+            { effective_to: null },
+            { effective_to: { [Op.gte]: effectiveFrom } },
+          ],
+        },
+      });
+
+      if (overlapCard) {
+        return res.status(400).json({
+          status: 400,
+          message: `Overlapping effective date range for ${mediaType}`,
+        });
+      }
+
+      const breakup = calculateRateBreakup(societyRate, mediaType);
+
+      if (card.id) {
+        await Society_Media_Rate_Card.update(
+          {
+            society_rate: breakup.society_rate,
+            platform_commission_pct: breakup.platform_commission_pct,
+            platform_rate: breakup.platform_rate,
+            company_rate: breakup.company_rate,
+            society_terms: selectedSocietyTerms,
+            whatsapp_details: normalizedWhatsappDetails,
+            effective_from: effectiveFrom,
+            effective_to: effectiveTo,
+            submission_stage: isDraftSave ? "draft" : "submitted",
+            modified_by: req.user.id,
+            modified_type: createdType,
+            modified_ip_address: req.ip,
+          },
+          { where: { id: card.id, society_id: societyId } }
+        );
+
+        const updated = await Society_Media_Rate_Card.findByPk(card.id);
+        if (updated) savedCards.push(updated);
+      } else {
+        const created = await Society_Media_Rate_Card.create({
+          society_id: societyId,
+          media_type: mediaType,
+          society_rate: breakup.society_rate,
+          platform_commission_pct: breakup.platform_commission_pct,
+          platform_rate: breakup.platform_rate,
+          company_rate: breakup.company_rate,
+          society_terms: selectedSocietyTerms,
+          whatsapp_details: normalizedWhatsappDetails,
+          effective_from: effectiveFrom,
+          effective_to: effectiveTo,
+          submission_stage: isDraftSave ? "draft" : "submitted",
+          created_by: req.user.id,
+          created_type: createdType,
+          created_ip_address: req.ip,
+          status: "active",
+        });
+        savedCards.push(created);
+      }
+    }
+
+    // Any previously active media type not present in this request
+    // is treated as "not offered" by society and soft-deleted.
+    const activeCards = await Society_Media_Rate_Card.findAll({
+      where: {
+        society_id: societyId,
+        status: "active",
+      },
+      attributes: ["id", "media_type"],
+    });
+
+    const cardsToDelete = activeCards
+      .filter((item) => !requestedMediaTypes.has(item.media_type))
+      .map((item) => item.id);
+
+    if (cardsToDelete.length > 0) {
+      await Society_Media_Rate_Card.update(
+        {
+          status: "delete",
+          modified_by: req.user.id,
+          modified_type: createdType,
+          modified_ip_address: req.ip,
+        },
+        {
+          where: {
+            id: { [Op.in]: cardsToDelete },
+            society_id: societyId,
+          },
+        }
+      );
+    }
+
+    return res.status(200).json({
+      status: 200,
+      message: isDraftSave
+        ? "Media rate cards saved as draft successfully"
+        : "Media rate cards submitted successfully",
+      data: savedCards,
+    });
+  } catch (error) {
+    console.error("[upsertSocietyMediaRateCards]", error?.message, error?.stack);
+    return res.status(500).json({
+      status: 500,
+      message: "Failed to save media rate cards",
+      error: error.message,
+    });
+  }
 };
 
 exports.societyRegistrationUpdateImage = async (req, res) => {
@@ -490,7 +747,8 @@ exports.societyRegistrationUpdateImage = async (req, res) => {
       "society_whatsapp_img_path",
       "pan_card_path",
       "gst_certificate_path",
-      "other_document_path"
+      "other_document_path",
+      "billing_qr_code_path"
     ];
 
     let imagePaths = {};
@@ -502,16 +760,6 @@ exports.societyRegistrationUpdateImage = async (req, res) => {
         imageNames[field] = path.basename(req.files[field][0].filename);
       }
     });
-
-    // ✅ Require PAN card if missing
-    const isPanCardRequired =
-      !profile ||
-      !profile.pan_card_path ||
-      profile.pan_card_path === "";
-
-    if (isPanCardRequired && (!req.files["pan_card_path"] || !req.files["pan_card_path"][0])) {
-      return res.status(400).json({ status: 400, error: "PAN card is required." });
-    }
 
     // ✅ Validate city
     const city = await City.findByPk(req.body.city_id);
@@ -584,11 +832,17 @@ exports.societyRegistrationUpdateImage = async (req, res) => {
       society_id: societyId,
       society_user_id: user_id,
       number_of_flat: safeNumber(req.body.number_of_flat),
-      number_of_members: safeNumber(req.body.number_of_members),
+      number_of_members:
+        req.body.number_of_members === undefined
+          ? profile.number_of_members
+          : safeNumber(req.body.number_of_members),
       society_email: req.body.society_email,
-      whatsapp_group_name: req.body.whatsapp_group_name,
-      society_whatsapp_img_path: imagePaths["society_whatsapp_img_path"],
-      society_whatsapp_img_name: imageNames["society_whatsapp_img_path"],
+      whatsapp_group_name:
+        req.body.whatsapp_group_name ?? profile.whatsapp_group_name,
+      society_whatsapp_img_path:
+        imagePaths["society_whatsapp_img_path"] || profile.society_whatsapp_img_path,
+      society_whatsapp_img_name:
+        imageNames["society_whatsapp_img_path"] || profile.society_whatsapp_img_name,
       address_line_1: req.body.address_line_1,
       address_line_2: req.body.address_line_2,
       account_holder_name: req.body.account_holder_name,
@@ -598,6 +852,10 @@ exports.societyRegistrationUpdateImage = async (req, res) => {
       bank_ifsc_code: req.body.bank_ifsc_code,
       billing_address_line_1: req.body.billing_address_line_1,
       billing_address_line_2: req.body.billing_address_line_2,
+      billing_qr_code_path:
+        imagePaths["billing_qr_code_path"] || profile.billing_qr_code_path,
+      billing_qr_code_name:
+        imageNames["billing_qr_code_path"] || profile.billing_qr_code_name,
       society_profile_img_1_path: updatedFields.society_profile_img_1_path || profile.society_profile_img_1_path,
       society_profile_img_2_path: updatedFields.society_profile_img_2_path || profile.society_profile_img_2_path,
       society_profile_img_3_path: updatedFields.society_profile_img_3_path || profile.society_profile_img_3_path,
@@ -608,69 +866,77 @@ exports.societyRegistrationUpdateImage = async (req, res) => {
       society_profile_img_3_name: updatedFields.society_profile_img_3_name || profile.society_profile_img_3_name,
       society_profile_img_4_name: updatedFields.society_profile_img_4_name || profile.society_profile_img_4_name,
       society_profile_img_5_name: updatedFields.society_profile_img_5_name || profile.society_profile_img_5_name,
-      pan_card_path: imagePaths["pan_card_path"],
-      pan_card_name: imageNames["pan_card_path"],
-      gst_certificate_path: imagePaths["gst_certificate_path"],
-      gst_certificate_name: imageNames["gst_certificate_path"],
-      other_document_path: imagePaths["other_document_path"],
-      other_document_name: imageNames["other_document_path"],
+      pan_card_path: imagePaths["pan_card_path"] || profile.pan_card_path,
+      pan_card_name: imageNames["pan_card_path"] || profile.pan_card_name,
+      gst_certificate_path:
+        imagePaths["gst_certificate_path"] || profile.gst_certificate_path,
+      gst_certificate_name:
+        imageNames["gst_certificate_path"] || profile.gst_certificate_name,
+      other_document_path:
+        imagePaths["other_document_path"] || profile.other_document_path,
+      other_document_name:
+        imageNames["other_document_path"] || profile.other_document_name,
       google_page_url: req.body.google_page_url || '',
-      ads_per_day: safeNumber(req.body.ads_per_day),
+      ads_per_day:
+        req.body.ads_per_day === undefined
+          ? profile.ads_per_day
+          : safeNumber(req.body.ads_per_day),
       modified_ip_address: req.ip,
       modified_by: userId,
       modified_type: societyType || userType,
       status: 'active'
     });
 
-    // ✅ Handle ads slots
-    const slots = JSON.parse(req.body.ads_slot || '[]');
     const savedSlots = [];
-
-    if (slots.length === 0) {
-      await Ads_Slot.update(
-        {
-          status: 'delete',
-          modified_by: userId,
-          modified_type: societyType || userType,
-        },
-        {
-          where: {
-            society_id: societyId,
-            status: 'active',
+    // ✅ Handle ads slots only when payload explicitly includes them.
+    if (typeof req.body.ads_slot !== "undefined") {
+      const slots = JSON.parse(req.body.ads_slot || "[]");
+      if (slots.length === 0) {
+        await Ads_Slot.update(
+          {
+            status: 'delete',
+            modified_by: userId,
+            modified_type: societyType || userType,
           },
-        }
-      );
-    } else {
-      for (const slot of slots) {
-        if (slot.is_checked) {
-          const { days, from_time, to_time } = slot;
-          await Ads_Slot.update(
-            {
-              status: 'delete',
-              modified_by: userId,
-              modified_type: societyType || userType,
+          {
+            where: {
+              society_id: societyId,
+              status: 'active',
             },
-            {
-              where: {
-                society_id: societyId,
-                days,
-                status: 'active',
+          }
+        );
+      } else {
+        for (const slot of slots) {
+          if (slot.is_checked) {
+            const { days, from_time, to_time } = slot;
+            await Ads_Slot.update(
+              {
+                status: 'delete',
+                modified_by: userId,
+                modified_type: societyType || userType,
               },
-            }
-          );
-          const savedSlot = await Ads_Slot.create({
-            society_id: societyId,
-            society_user_id: user_id,
-            days,
-            from_time,
-            to_time,
-            is_checked: true,
-            created_by: userId,
-            created_ip_address: req.ip,
-            status: 'active',
-            created_type: societyType || userType,
-          });
-          savedSlots.push(savedSlot);
+              {
+                where: {
+                  society_id: societyId,
+                  days,
+                  status: 'active',
+                },
+              }
+            );
+            const savedSlot = await Ads_Slot.create({
+              society_id: societyId,
+              society_user_id: user_id,
+              days,
+              from_time,
+              to_time,
+              is_checked: true,
+              created_by: userId,
+              created_ip_address: req.ip,
+              status: 'active',
+              created_type: societyType || userType,
+            });
+            savedSlots.push(savedSlot);
+          }
         }
       }
     }

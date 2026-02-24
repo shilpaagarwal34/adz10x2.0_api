@@ -23,6 +23,10 @@ const Campaign = sequelize.define('Campaign',{
           type: DataTypes.STRING,
           allowNull:true
      },
+     media_type:{
+          type: DataTypes.STRING,
+          allowNull:true
+     },
      creative_type:{
           type:DataTypes.STRING,
           allowNull:true

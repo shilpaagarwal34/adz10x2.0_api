@@ -75,6 +75,14 @@ const Society_Profile = sequelize.define('SocietyProfile', {
         type: DataTypes.TEXT,
         allowNull: true
     },
+    billing_qr_code_path: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
+    billing_qr_code_name: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
     society_profile_img_1_path: {
         type: DataTypes.STRING,
         allowNull: true

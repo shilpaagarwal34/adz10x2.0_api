@@ -2,6 +2,7 @@ const express = require('express');
 
 // base 
 const baseController = require("@controllers/Base/Base_Controller");
+const chatbotController = require("@controllers/Base/Chatbot_Controller");
 
 //  society
 const dashbordController = require("@controllers/Society/Dashbord/Dashbord_Controller")
@@ -173,6 +174,7 @@ router.post('/change-status', baseController.commonStatus);
 router.post('/login', baseController.login);
 router.post('/logout', baseController.logout);
 router.post('/login-users', baseController.loginUser);
+router.post('/chatbot/query', chatbotController.chatbotQuery);
 // router.post('/logins', baseController.Logins);
 router.post('/forgot-password', baseController.forgotPassword);
 router.post('/change-password', baseController.changePassword);
@@ -243,6 +245,8 @@ router.post('/society-register',societyRegistaratonController.societyRegistratio
 
 router.get('/society-dashboard',authenticateSocietyUser ,dashbordController.getSocietyDashbord);
 router.get('/society-profile-ads',authenticateSocietyUser, profileController.getSocietyProfileSlot);
+router.get('/society/media-rate-cards', authenticateSocietyUser, profileController.getSocietyMediaRateCards);
+router.post('/society/media-rate-cards', authenticateSocietyUser, profileController.upsertSocietyMediaRateCards);
 router.post('/society-profile', authenticateSocietyUser ,profileController.getSocietyProfile);
 
 // router.post('/society-profile')
@@ -256,6 +260,7 @@ router.post('/society-profile-update', upload.fields([
      { name: 'pan_card_path', maxCount:1},
      { name: 'gst_certificate_path', maxCount:1},
      { name: 'other_document_path', maxCount:1},
+     { name: 'billing_qr_code_path', maxCount:1},
  ]),authenticateSocietyUser , profileController.societyRegistrationUpdateImage);
 
  router.get('/society/advertisement-datatable', authenticateSocietyUser, AdvertisementController.advertisementDataTable);
@@ -343,6 +348,7 @@ router.get('/company/campaign-datatable', authenticateCompanyUser, CampaignContr
 
 router.post('/get-societies-within-radius',  CampaignController.getSocietiesWithinRadius);
 router.get('/get-campaign-type', authenticateCompanyUser, CampaignController.getCampaignType);
+router.get('/company/media-rate-cards', authenticateCompanyUser, CampaignController.getCompanySocietyMediaRateCards);
 
 // society report
 router.get('/company/report-spend-table',authenticateCompanyUser, CompanyReportController.spendReportDataTable);

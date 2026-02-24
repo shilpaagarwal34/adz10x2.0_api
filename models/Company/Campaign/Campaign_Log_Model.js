@@ -31,6 +31,10 @@ const Campaign_Log = sequelize.define('Campaign_Log',{
           type: DataTypes.STRING,
           allowNull:true
      },
+     media_type:{
+          type: DataTypes.STRING,
+          allowNull:true
+     },
      creative_type:{
           type:DataTypes.STRING,
           allowNull:true
@@ -104,6 +108,22 @@ const Campaign_Log = sequelize.define('Campaign_Log',{
             allowNull:true
         },
         campaign_ads_amount:{
+            type: DataTypes.FLOAT,
+            allowNull:true
+       },
+       society_rate_snapshot:{
+            type: DataTypes.FLOAT,
+            allowNull:true
+       },
+       platform_commission_pct_snapshot:{
+            type: DataTypes.FLOAT,
+            allowNull:true
+       },
+       platform_rate_snapshot:{
+            type: DataTypes.FLOAT,
+            allowNull:true
+       },
+       company_rate_snapshot:{
             type: DataTypes.FLOAT,
             allowNull:true
        },
