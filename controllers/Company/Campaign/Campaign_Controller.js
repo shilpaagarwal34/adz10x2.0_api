@@ -799,8 +799,6 @@ exports.getSocietiesWithinRadius = async (req, res) => {
                 }
             });
 
-            if (!adsSlotExists) continue;
-
             const profile = await Society_Profile.findOne({
                 where: { society_id: society.id },
                 // attributes: ['id', 'society_id', 'ads_per_day']
@@ -815,11 +813,13 @@ exports.getSocietiesWithinRadius = async (req, res) => {
             }
 
             const allowed = profile?.ads_per_day ?? 0;
-            const disable = used >= allowed;
-
-            // Construct disable message if applicable
+            let disable = used >= allowed;
             let disable_message = '';
-            if (disable) {
+
+            if (!adsSlotExists) {
+                disable = true;
+                disable_message = `No ad slot configured for ${day} for this society. Society can set up slots in Profile / Society profile ads.`;
+            } else if (disable) {
                 disable_message = `Ad limit (${allowed}) reached for this society on ${campaign_date}`;
             }
 
