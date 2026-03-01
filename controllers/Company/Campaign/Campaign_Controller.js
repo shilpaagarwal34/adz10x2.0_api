@@ -753,13 +753,13 @@ exports.getSocietiesWithinRadius = async (req, res) => {
             });
         }
 
-        // 2. Filter societies
-        // const whereCondition = {};
-        // const whereCondition = { status: "active" };   // default filter
-                // 2. Filter societies
+        // 2. Filter societies (kyc_status = approved is set by admin; account_status kept in sync on approve)
         const whereCondition = { 
             status: "active",
-            account_status: "approved"
+            [Op.or]: [
+                { account_status: "approved" },
+                { kyc_status: "approved" }
+            ]
         };
         if (campaign_city_id) whereCondition.city_id = campaign_city_id;
         if (campaign_area_id) whereCondition.area_id = campaign_area_id;

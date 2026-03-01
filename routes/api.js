@@ -181,7 +181,7 @@ router.post('/change-password', baseController.changePassword);
 router.post("/verify-otp", baseController.verifyOTP);
 router.post("/resend-otp", baseController.resendOTP);
 
-router.get('/admin/rel-manager', baseController.relationManagerID);
+router.get('/admin/rel-manager', authenticateUser, baseController.relationManagerID);
 router.get('/admin-all-campaign-days',baseController.getAllCampaignDays);
 
 router.post('/admin-register', adminRegController.registerAdmin);

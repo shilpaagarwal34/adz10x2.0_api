@@ -405,6 +405,7 @@ exports.assignManagerSociety = async (req, res) => {
         society_lead_generation,
         society_survey,
         kyc_status,
+        account_status: 'approved', // so company campaign API (getSocietiesWithinRadius) includes this society
         allow_edit: false,
         aggrement_copy_path: imagePaths["aggrement_copy_path"],
         aggrement_copy_name: imageNames["aggrement_copy_path"],
