@@ -1,6 +1,5 @@
 const Campaign = require('@models/Company/Campaign/Campaign_Model');
 const Campaign_Log = require('@models/Company/Campaign/Campaign_Log_Model');
-const Ads_Slot = require('@models/Society/Auth/Society_Ads_Slot_Model');
 const Society_Registration = require('@models/Society/Auth/Society_Registration_Model');
 const Society_Profile = require('@models/Society/Auth/Society_Profile_Model');
 const Campaign_Configuration = require('@models/Admin/Master/Campaign_Configuration_Model');
@@ -786,19 +785,6 @@ exports.getSocietiesWithinRadius = async (req, res) => {
                 if (distance > parseFloat(radius_km)) continue;
             }
 
-            const adsSlotExists = await Ads_Slot.findOne({
-                where: {
-                    society_id: society.id,
-                    status: 'active',
-                    [Op.and]: [
-                        Sequelize.where(
-                            Sequelize.fn('LOWER', Sequelize.col('days')),
-                            day.toLowerCase()
-                        )
-                    ]
-                }
-            });
-
             const profile = await Society_Profile.findOne({
                 where: { society_id: society.id },
                 // attributes: ['id', 'society_id', 'ads_per_day']
@@ -813,15 +799,8 @@ exports.getSocietiesWithinRadius = async (req, res) => {
             }
 
             const allowed = profile?.ads_per_day ?? 0;
-            let disable = used >= allowed;
-            let disable_message = '';
-
-            if (!adsSlotExists) {
-                disable = true;
-                disable_message = `No ad slot configured for ${day} for this society. Society can set up slots in Profile / Society profile ads.`;
-            } else if (disable) {
-                disable_message = `Ad limit (${allowed}) reached for this society on ${campaign_date}`;
-            }
+            const disable = used >= allowed;
+            let disable_message = disable ? `Ad limit (${allowed}) reached for this society on ${campaign_date}` : '';
 
             let media_rate = null;
             if (media_type && isValidMediaType(media_type)) {
