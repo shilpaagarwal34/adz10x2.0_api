@@ -850,6 +850,14 @@ exports.getSocietiesWithinRadius = async (req, res) => {
                 }
             }
 
+            // All media platforms this society offers (for display on company portal)
+            const offeredCards = await Society_Media_Rate_Card.findAll({
+                where: { society_id: society.id, status: 'active' },
+                attributes: ['media_type'],
+                raw: true,
+            });
+            const offered_media_types = [...new Set((offeredCards || []).map((c) => c.media_type).filter(Boolean))];
+
             societiesWithinRadius.push({
                 society,
                 profile,
@@ -857,7 +865,8 @@ exports.getSocietiesWithinRadius = async (req, res) => {
                 allowed,
                 disable: disable || (media_type && !media_rate),
                 disable_message,
-                media_rate
+                media_rate,
+                offered_media_types,
             });
         }
 
