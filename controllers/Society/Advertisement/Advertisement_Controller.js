@@ -805,28 +805,33 @@ in your dashboard</p>
       
 
     }else {
-
-      const campaignDateIST = moment(campaign.campaign_date).tz('Asia/Kolkata'); // retain timezone
-
-      const liveStartDate = moment.tz(
-        `${campaignDateIST.format('YYYY-MM-DD')} ${slot_start_time}`,
-        'YYYY-MM-DD HH:mm:ss',
-        'Asia/Kolkata'
-      );
-
-      const liveEndDate = liveStartDate.clone().add(24, 'hours');
-
+      const hasSlotRange = Boolean(slot_start_time && slot_end_time);
       updatedFields.society_cancel_reason = null;
-  
-      updatedFields.slot_start_time = slot_start_time;
-      updatedFields.slot_end_time = slot_end_time;
-      updatedFields.live_start_date = liveStartDate.toDate();
-      updatedFields.live_end_date = liveEndDate.toDate();
       updatedFields.approved_date = moment().tz('Asia/Kolkata').toDate();
       updatedFields.society_approved_date = moment().tz('Asia/Kolkata').toDate();
       updatedFields.society_approved_status = society_approved_status;
       updatedFields.approved_by = 'Society';
-     
+
+      if (hasSlotRange) {
+        const campaignDateIST = moment(campaign.campaign_date).tz('Asia/Kolkata'); // retain timezone
+        const liveStartDate = moment.tz(
+          `${campaignDateIST.format('YYYY-MM-DD')} ${slot_start_time}`,
+          'YYYY-MM-DD HH:mm:ss',
+          'Asia/Kolkata'
+        );
+        const liveEndDate = liveStartDate.clone().add(24, 'hours');
+        updatedFields.slot_start_time = slot_start_time;
+        updatedFields.slot_end_time = slot_end_time;
+        updatedFields.live_start_date = liveStartDate.toDate();
+        updatedFields.live_end_date = liveEndDate.toDate();
+      } else {
+        // Time slot is optional for society approval.
+        updatedFields.slot_start_time = null;
+        updatedFields.slot_end_time = null;
+        updatedFields.live_start_date = null;
+        updatedFields.live_end_date = null;
+      }
+
       // ✅ Set campaign_status to 'approve' only if society has approved
       if (society_approved_status === 'approved') {
         updatedFields.campaign_status = 'approved';

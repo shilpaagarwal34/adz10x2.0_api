@@ -1009,6 +1009,11 @@ exports.getSocietiesWithinRadius = async (req, res) => {
                 availabilityPreview = availabilityResult?.availability_preview || null;
                 const activeRateCard = availabilityResult?.card || null;
 
+                // If society does not offer the selected platform at all, hide it from company list.
+                if (!activeRateCard && availabilityResult?.reason_code === "platform_not_offered") {
+                    continue;
+                }
+
                 if (activeRateCard) {
                     media_rate = {
                         id: activeRateCard.id,
