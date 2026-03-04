@@ -28,6 +28,7 @@ const Company_Profile = require('@models/Company/Auth/Company_Profile_Model');
 const Society_Withdraw_Payments = require('@models/Society/Payments/Withdraw_Model');
 const Payment_Order = require('@models/Company/Wallet/Payment_Order_Model');
 const Society_Profile = require('@models/Society/Auth/Society_Profile_Model');
+const { MEDIA_TYPES, getMediaPlatformConfig } = require('@helper/mediaRateHelper');
 // Configure AWS SES
 
 const ses = new AWS.SES({ apiVersion: '2010-12-01' });
@@ -246,7 +247,7 @@ exports.getAllSociety = async (req, res) => {
 exports.getAllCampaignDays = async (req, res) => {
     try {
         const campaign_days = await Campaign_Configuration.findOne({
-            attributes: ['id', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],
+            attributes: ['id', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun', 'platform_rules'],
             where: { status: 'active' },
             order: [['createdAt', 'ASC']]
         });
@@ -290,10 +291,23 @@ exports.getAllCampaignDays = async (req, res) => {
             is_checked: !!campaign_days[day.key]
         }));
 
+        const configuredRules = campaign_days?.platform_rules || {};
+        const mediaPlatforms = MEDIA_TYPES.map((mediaType) => {
+            const defaults = getMediaPlatformConfig(mediaType);
+            const configured = configuredRules?.[mediaType] || {};
+            return {
+                media_type: mediaType,
+                label: defaults.label || mediaType,
+                min_lead_days: Number(configured.min_lead_days ?? defaults.min_lead_days ?? 0),
+                min_active_days: Number(configured.min_active_days ?? defaults.min_active_days ?? defaults.duration_days ?? 0),
+            };
+        });
+
         return res.status(200).json({
             status: 200,
             message: 'Campaign days fetched successfully',
-            data: responseData
+            data: responseData,
+            media_platforms: mediaPlatforms
         });
 
     } catch (error) {

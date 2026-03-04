@@ -65,6 +65,10 @@ const CampaignConfiguration = sequelize.define('Campaign Configuration', {
           type:DataTypes.INTEGER,
           allowNull:true
      },
+     platform_rules: {
+          type: DataTypes.JSON,
+          allowNull: true
+     },
      created_ip_address: {
           type: DataTypes.STRING,
           allowNull: true,

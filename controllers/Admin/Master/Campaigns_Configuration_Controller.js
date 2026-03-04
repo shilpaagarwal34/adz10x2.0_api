@@ -1,11 +1,55 @@
 const Campaign_Configuration = require('@models/Admin/Master/Campaign_Configuration_Model');
 const Notification = require('@models/Notifications/Notification_Model');
+const { MEDIA_TYPES, getMediaPlatformConfig } = require('@helper/mediaRateHelper');
+
+const parsePlatformRules = (incomingRules = {}) => {
+    const parsed =
+        typeof incomingRules === "string"
+            ? (() => {
+                  try {
+                      return JSON.parse(incomingRules);
+                  } catch (_) {
+                      return {};
+                  }
+              })()
+            : incomingRules || {};
+
+    const normalizedRules = {};
+    MEDIA_TYPES.forEach((mediaType) => {
+        const defaults = getMediaPlatformConfig(mediaType);
+        const candidate = parsed?.[mediaType] || {};
+        const minLeadDays = Number(candidate.min_lead_days);
+        const minActiveDays = Number(candidate.min_active_days);
+
+        normalizedRules[mediaType] = {
+            min_lead_days: Number.isFinite(minLeadDays) && minLeadDays >= 0 ? minLeadDays : Number(defaults.min_lead_days || 0),
+            min_active_days:
+                Number.isFinite(minActiveDays) && minActiveDays > 0 ? minActiveDays : Number(defaults.min_active_days || 1),
+        };
+    });
+
+    return normalizedRules;
+};
+
+const buildMediaPlatforms = (platformRules = {}) =>
+    MEDIA_TYPES.map((mediaType) => {
+        const defaults = getMediaPlatformConfig(mediaType);
+        const rule = platformRules?.[mediaType] || {};
+        return {
+            media_type: mediaType,
+            label: defaults.label || mediaType,
+            min_lead_days: Number(rule.min_lead_days ?? defaults.min_lead_days ?? 0),
+            min_active_days: Number(rule.min_active_days ?? defaults.min_active_days ?? defaults.duration_days ?? 0),
+        };
+    });
 
 exports.store = async (req, res) => {
      try {
         //  const userId = req.user.id; // logged-in user ID
-         const { id, brand_promotion,lead_generation,survey,mon,tue,wed,thu,fri,sat,sun,from_time,to_time,society_commission, society_brand_promotion,society_lead_generation, society_survey } = req.body;
+         const { id, brand_promotion,lead_generation,survey,mon,tue,wed,thu,fri,sat,sun,from_time,to_time,society_commission, society_brand_promotion,society_lead_generation, society_survey, platform_rules } = req.body;
          const { privileges, isSuperAdmin } = req.user;
+         const hasPlatformRules = Object.prototype.hasOwnProperty.call(req.body, "platform_rules");
+         const normalizedPlatformRules = hasPlatformRules ? parsePlatformRules(platform_rules) : null;
      
         if (id) {
             const existingCampaign = await Campaign_Configuration.findByPk(id);
@@ -13,25 +57,37 @@ exports.store = async (req, res) => {
                 return res.status(404).json({ status: 404, message: 'Campaign not found' });
             }
 
-            await existingCampaign.update({
-                brand_promotion,
-                lead_generation,
-                survey,
-                mon,
-                tue,
-                wed,
-                thu,
-                fri,
-                sat,
-                sun,
-                from_time,
-                to_time,
-                society_commission,
-                society_brand_promotion,
-                society_lead_generation,
-                society_survey,
-                updated_ip_address: req.ip,
+            const updatePayload = { updated_ip_address: req.ip };
+            if (hasPlatformRules) {
+                updatePayload.platform_rules = normalizedPlatformRules;
+            }
+
+            const optionalFields = [
+                'brand_promotion',
+                'lead_generation',
+                'survey',
+                'mon',
+                'tue',
+                'wed',
+                'thu',
+                'fri',
+                'sat',
+                'sun',
+                'from_time',
+                'to_time',
+                'society_commission',
+                'society_brand_promotion',
+                'society_lead_generation',
+                'society_survey',
+            ];
+
+            optionalFields.forEach((field) => {
+                if (Object.prototype.hasOwnProperty.call(req.body, field)) {
+                    updatePayload[field] = req.body[field];
+                }
             });
+
+            await existingCampaign.update(updatePayload);
 
             // Notifications (directly without checking for changes)
             if (brand_promotion || lead_generation || survey) {
@@ -71,7 +127,11 @@ exports.store = async (req, res) => {
             return res.status(200).json({
                 status: 200,
                 message: 'Campaign configuration updated successfully',
-                data: existingCampaign
+                data: {
+                    ...existingCampaign.toJSON(),
+                    platform_rules: parsePlatformRules(existingCampaign.platform_rules || {}),
+                    media_platforms: buildMediaPlatforms(parsePlatformRules(existingCampaign.platform_rules || {})),
+                }
             });
         }else {
                 // if (!isSuperAdmin && !privileges.includes('campaign_configuration_add')) {
@@ -97,6 +157,7 @@ exports.store = async (req, res) => {
                  society_brand_promotion,
                  society_lead_generation,
                  society_survey,
+                 platform_rules: parsePlatformRules(platform_rules),
                  created_ip_address: req.ip,
                 //  created_by:userId
              });
@@ -141,7 +202,11 @@ exports.store = async (req, res) => {
              return res.status(201).json({
                  status: 201,
                  message: "Campaign configuration created successfully",
-                 data: create
+                 data: {
+                    ...create.toJSON(),
+                    platform_rules: parsePlatformRules(create.platform_rules || {}),
+                    media_platforms: buildMediaPlatforms(parsePlatformRules(create.platform_rules || {})),
+                 }
              });
          }
      } catch (error) {
@@ -164,7 +229,16 @@ exports.getCampaign = async (req, res) => {
             return res.status(404).json({ status:404,  message: 'Campaign not found' });
         }
 
-        return res.status(200).json({ status: 200, message: 'Campaign fetched successfully', data: campaign });
+        const normalizedPlatformRules = parsePlatformRules(campaign.platform_rules || {});
+        return res.status(200).json({
+            status: 200,
+            message: 'Campaign fetched successfully',
+            data: {
+                ...campaign.toJSON(),
+                platform_rules: normalizedPlatformRules,
+                media_platforms: buildMediaPlatforms(normalizedPlatformRules),
+            }
+        });
     } catch (err) {
         return res.status(500).json({ error: err.message });
     }

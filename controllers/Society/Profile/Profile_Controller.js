@@ -367,6 +367,12 @@ exports.getSocietyMediaRateCards = async (req, res) => {
       where: whereClause,
       order: [["media_type", "ASC"], ["effective_from", "DESC"]],
     });
+    const campaignConfig = await Campaign_Configuration.findOne({
+      attributes: ["platform_rules"],
+      where: { status: "active" },
+      order: [["createdAt", "ASC"]],
+    });
+    const configuredRules = campaignConfig?.platform_rules || {};
 
     const cardsByMediaType = {};
     cards.forEach((card) => {
@@ -377,9 +383,17 @@ exports.getSocietyMediaRateCards = async (req, res) => {
 
     const platforms = MEDIA_TYPES.map((mediaType) => {
       const config = getMediaPlatformConfig(mediaType);
+      const configured = configuredRules?.[mediaType] || {};
+      const minLeadDays = Number(configured.min_lead_days ?? config.min_lead_days ?? 0);
+      const minActiveDays = Number(
+        configured.min_active_days ?? config.min_active_days ?? config.duration_days ?? 0
+      );
       return {
         media_type: mediaType,
-        duration_days: config.duration_days,
+        label: config.label || mediaType,
+        min_lead_days: minLeadDays,
+        min_active_days: minActiveDays,
+        duration_days: minActiveDays,
         generic_terms: config.generic_terms,
         society_terms_options: SOCIETY_APPENDABLE_TERMS_OPTIONS,
         card: cardsByMediaType[mediaType] || null,
@@ -1293,7 +1307,7 @@ exports.deleteSocietyProfileImage = async (req, res) => {
 exports.getCampaignDays = async (req, res) => {
     try {
         const campaign_days = await Campaign_Configuration.findOne({
-            attributes: ['id', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun', 'from_time', 'to_time'],
+            attributes: ['id', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun', 'from_time', 'to_time', 'platform_rules'],
             where: { status: 'active' },
             order: [['createdAt', 'ASC']]
         });
@@ -1337,10 +1351,23 @@ exports.getCampaignDays = async (req, res) => {
             is_checked: !!campaign_days[day.key]
         }));
 
+        const configuredRules = campaign_days?.platform_rules || {};
+        const mediaPlatforms = MEDIA_TYPES.map((mediaType) => {
+            const defaults = getMediaPlatformConfig(mediaType);
+            const configured = configuredRules?.[mediaType] || {};
+            return {
+                media_type: mediaType,
+                label: defaults.label || mediaType,
+                min_lead_days: Number(configured.min_lead_days ?? defaults.min_lead_days ?? 0),
+                min_active_days: Number(configured.min_active_days ?? defaults.min_active_days ?? defaults.duration_days ?? 0)
+            };
+        });
+
         return res.status(200).json({
             status: 200,
             message: 'Campaign days fetched successfully',
-            data: responseData
+            data: responseData,
+            media_platforms: mediaPlatforms
         });
 
     } catch (error) {

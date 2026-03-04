@@ -13,31 +13,45 @@ const MEDIA_TYPES = [
 
 const MEDIA_PLATFORM_CONFIG = {
   lift_branding_panels: {
-    duration_days: 30,
+    label: "Lift branding panels",
+    min_lead_days: 2,
+    min_active_days: 30,
     generic_terms: "Branding creatives should comply with society branding guidelines.",
   },
   notice_board_sponsorship: {
-    duration_days: 15,
+    label: "Notice board sponsorship",
+    min_lead_days: 2,
+    min_active_days: 15,
     generic_terms: "Notice board creatives will be displayed in approved common areas only.",
   },
   gate_entry_exit_branding: {
-    duration_days: 20,
+    label: "Gate entry/exit branding",
+    min_lead_days: 2,
+    min_active_days: 20,
     generic_terms: "Gate branding should not obstruct security visibility or safety signage.",
   },
   society_kiosk: {
-    duration_days: 10,
+    label: "Society kiosk",
+    min_lead_days: 2,
+    min_active_days: 10,
     generic_terms: "Kiosk setup and teardown should follow society timing and access rules.",
   },
   society_newsletter_sponsor_slots: {
-    duration_days: 30,
+    label: "Society newsletter sponsor slots",
+    min_lead_days: 2,
+    min_active_days: 30,
     generic_terms: "Newsletter sponsorship content is subject to editorial approval.",
   },
   whatsapp_promotional_day: {
-    duration_days: 1,
+    label: "WhatsApp promotional day",
+    min_lead_days: 1,
+    min_active_days: 1,
     generic_terms: "Promotional messages should be non-spam and shared only in approved groups.",
   },
   event_sponsorship: {
-    duration_days: 7,
+    label: "Event sponsorship",
+    min_lead_days: 3,
+    min_active_days: 7,
     generic_terms: "Event sponsorship material should follow event-specific society policy.",
   },
 };
@@ -82,8 +96,18 @@ function isValidMediaType(mediaType) {
 
 function getMediaPlatformConfig(mediaType) {
   const normalized = normalizeMediaType(mediaType);
+  const config = MEDIA_PLATFORM_CONFIG[normalized];
+  if (config) {
+    return {
+      ...config,
+      duration_days: config.min_active_days,
+    };
+  }
   return (
-    MEDIA_PLATFORM_CONFIG[normalized] || {
+    {
+      label: normalized || "Unknown platform",
+      min_lead_days: 0,
+      min_active_days: 0,
       duration_days: 0,
       generic_terms: "",
     }

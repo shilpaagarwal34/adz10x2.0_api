@@ -16,7 +16,7 @@ const path = require('path');
 const { where, literal, Sequelize } = require('sequelize');
 const { Op,fn, col } = require('sequelize');
 const moment = require('moment-timezone');
-const { normalizeMediaType, isValidMediaType, calculateRateBreakup } = require('@helper/mediaRateHelper');
+const { MEDIA_TYPES, normalizeMediaType, isValidMediaType, calculateRateBreakup, getMediaPlatformConfig } = require('@helper/mediaRateHelper');
 
 const resolveRequestedSocietyIds = (body = {}) => {
     const ids = new Set();
@@ -66,6 +66,33 @@ const getActiveRateCardForDate = async (societyId, mediaType, date) => {
     });
 };
 
+const getPlatformRulesFromConfig = (campaignConfig = null) => {
+    const configuredRules = campaignConfig?.platform_rules || {};
+    const mergedRules = {};
+
+    MEDIA_TYPES.forEach((mediaType) => {
+        const defaults = getMediaPlatformConfig(mediaType);
+        const configured = configuredRules?.[mediaType] || {};
+        mergedRules[mediaType] = {
+            media_type: mediaType,
+            label: defaults.label || mediaType,
+            min_lead_days: Number(configured.min_lead_days ?? defaults.min_lead_days ?? 0),
+            min_active_days: Number(configured.min_active_days ?? defaults.min_active_days ?? defaults.duration_days ?? 0),
+        };
+    });
+
+    return mergedRules;
+};
+
+const fetchEffectivePlatformRules = async () => {
+    const campaignConfig = await Campaign_Configuration.findOne({
+        attributes: ['platform_rules'],
+        where: { status: 'active' },
+        order: [['createdAt', 'ASC']],
+    });
+    return getPlatformRulesFromConfig(campaignConfig);
+};
+
 exports.getCompanySocietyMediaRateCards = async (req, res) => {
     try {
         const { society_id, media_type, campaign_date } = req.query;
@@ -103,10 +130,12 @@ exports.getCompanySocietyMediaRateCards = async (req, res) => {
             where: whereClause,
             order: [["media_type", "ASC"], ["effective_from", "DESC"]],
         });
+        const platformRules = await fetchEffectivePlatformRules();
 
         return res.status(200).json({
             status: 200,
             message: "Company media rate cards fetched successfully",
+            media_platforms: Object.values(platformRules),
             data: cards,
         });
     } catch (error) {
@@ -715,6 +744,7 @@ exports.getSocietiesWithinRadius = async (req, res) => {
             radius_km,
             media_type
         } = req.body;
+        const platformRules = await fetchEffectivePlatformRules();
 
      
         let campaigns = [];
@@ -859,6 +889,8 @@ exports.getSocietiesWithinRadius = async (req, res) => {
             total: societiesWithinRadius.length,
             city_id: campaign_city_id || null,
             area_id: campaign_area_id || null,
+            media_platforms: Object.values(platformRules),
+            selected_media_constraints: media_type ? platformRules[normalizeMediaType(media_type)] || null : null,
             // campaigns: campaignsWithLogs,
             data: societiesWithinRadius
         });
@@ -895,6 +927,40 @@ exports.createOrUpdateCampaign = async (req, res) => {
         }
 
         const normalizedMediaType = normalizeMediaType(media_type);
+        if (normalizedMediaType && !isValidMediaType(normalizedMediaType)) {
+            return res.status(400).json({
+                status: 400,
+                message: "Invalid media_type selected",
+            });
+        }
+
+        const platformRules = await fetchEffectivePlatformRules();
+        const selectedPlatformRule = normalizedMediaType
+            ? platformRules[normalizedMediaType] || null
+            : null;
+
+        if (normalizedMediaType && campaign_date) {
+            const minLeadDays = Number(selectedPlatformRule?.min_lead_days || 0);
+            const minAllowedDate = moment().startOf("day").add(minLeadDays, "days");
+            const chosenDate = moment(campaign_date).startOf("day");
+
+            if (!chosenDate.isValid()) {
+                return res.status(400).json({
+                    status: 400,
+                    message: "Invalid campaign_date",
+                });
+            }
+
+            if (chosenDate.isBefore(minAllowedDate)) {
+                return res.status(400).json({
+                    status: 400,
+                    message: `Campaign start date for selected platform must be at least ${minLeadDays} day(s) from today`,
+                    min_allowed_date: minAllowedDate.format("YYYY-MM-DD"),
+                    platform_constraints: selectedPlatformRule,
+                });
+            }
+        }
+
         const selectedSocietyIds = resolveRequestedSocietyIds(req.body);
         const pricingBySociety = {};
         let resolvedCampaignAmount = Number(campaign_amount) || 0;
