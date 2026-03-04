@@ -518,6 +518,13 @@ exports.upsertSocietyMediaRateCards = async (req, res) => {
         });
       }
 
+      if (effectiveTo && effectiveFrom > effectiveTo) {
+        return res.status(400).json({
+          status: 400,
+          message: `Available From date cannot be after Available To date for media_type: ${mediaType}`,
+        });
+      }
+
       let normalizedWhatsappDetails = null;
       if (mediaType === "whatsapp_promotional_day") {
         const selectedDays = Array.isArray(incomingWhatsappDetails?.selected_days)
