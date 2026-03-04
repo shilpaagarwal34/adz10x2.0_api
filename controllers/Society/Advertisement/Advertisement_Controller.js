@@ -799,8 +799,12 @@ in your dashboard</p>
                       }
                     };
       
-                    // ✅ Send using AWS SES
-                    await ses.sendEmail(emailParams).promise();
+                    // Keep approval/rejection flow successful even if mail provider fails.
+                    try {
+                      await ses.sendEmail(emailParams).promise();
+                    } catch (mailError) {
+                      console.error("[advertisementApproved][reject-email]", mailError?.message);
+                    }
                   }
       
 
@@ -908,8 +912,12 @@ in your dashboard</p>
                                 }
                               };
                 
-                              // ✅ Send using AWS SES
-                              await ses.sendEmail(emailParams).promise();
+                              // Keep API response successful even if mail provider fails.
+                              try {
+                                await ses.sendEmail(emailParams).promise();
+                              } catch (mailError) {
+                                console.error("[advertisementApproved][all-rejected-email]", mailError?.message);
+                              }
                             }
 
 
@@ -977,8 +985,12 @@ in your dashboard</p>
                                   }
                                 };
                   
-                                // ✅ Send using AWS SES
-                                await ses.sendEmail(emailParams).promise();
+                                // Keep API response successful even if mail provider fails.
+                                try {
+                                  await ses.sendEmail(emailParams).promise();
+                                } catch (mailError) {
+                                  console.error("[advertisementApproved][all-approved-email]", mailError?.message);
+                                }
                               }
                   
                 }
