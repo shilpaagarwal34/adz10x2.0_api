@@ -350,6 +350,9 @@ exports.wallet_Add = async (req, res) => {
         }
 
         let company_users = await Company_Registration.findOne({ where: { id: comapnyId } });
+        if (!company_users) {
+            return res.status(400).json({ status: 400, message: "Company not found for wallet credit" });
+        }
 
         const { amount, razorpay_payment_id, razorpay_order_id } = req.body;
 
@@ -367,7 +370,7 @@ exports.wallet_Add = async (req, res) => {
         const gstAmount = (totalAmount - baseAmount).toFixed(2);
         const halfGST = (gstAmount / 2).toFixed(2);
 
-        let previousBalance = parseFloat(user.wallet_amount || 0);
+        let previousBalance = parseFloat(company_users.wallet_amount || 0);
         let newBalance = previousBalance + parseFloat(baseAmount);
 
         const invoiceId = 'RN' + Date.now();
@@ -382,8 +385,12 @@ exports.wallet_Add = async (req, res) => {
         const logoBase64 = `data:image/png;base64,${imageBuffer.toString('base64')}`;
 
         const invoiceFileName = `${invoiceId}.pdf`;
-        const invoicePath = path.join(__dirname, `../../../invoices/${invoiceFileName}`);
-        const invoiceUrl = `invoices/${invoiceFileName}`;
+        const invoicesDir = path.join(__dirname, '../../../invoices');
+        const invoicePath = path.join(invoicesDir, invoiceFileName);
+        let invoiceUrl = null;
+        if (!fs.existsSync(invoicesDir)) {
+            fs.mkdirSync(invoicesDir, { recursive: true });
+        }
 
         //  <p><strong>Due Date:</strong> ${moment().add(2, 'days').format('MMMM DD, YYYY')}</p>
 
@@ -457,15 +464,21 @@ exports.wallet_Add = async (req, res) => {
         `;
 
         // Generate PDF from HTML using Puppeteer
-       // const browser = await puppeteer.launch();
-const browser = await puppeteer.launch({
-  headless: true,
-  args: ['--no-sandbox', '--disable-setuid-sandbox']
-});
-        const page = await browser.newPage();
-        await page.setContent(invoiceHtml, { waitUntil: 'networkidle0' });
-        await page.pdf({ path: invoicePath, format: 'A4', printBackground: true });
-        await browser.close();
+        try {
+            const browser = await puppeteer.launch({
+                headless: true,
+                args: ['--no-sandbox', '--disable-setuid-sandbox']
+            });
+            const page = await browser.newPage();
+            await page.setContent(invoiceHtml, { waitUntil: 'networkidle0' });
+            await page.pdf({ path: invoicePath, format: 'A4', printBackground: true });
+            await browser.close();
+            invoiceUrl = `invoices/${invoiceFileName}`;
+        } catch (invoiceError) {
+            console.error("[wallet_Add] Invoice generation failed:", invoiceError?.message);
+            // Do not block wallet credit when invoice PDF generation fails.
+            invoiceUrl = null;
+        }
 
         const add_wallet = await Wallet.create({
             company_id: comapnyId,
@@ -489,7 +502,7 @@ const browser = await puppeteer.launch({
 
         await Company_Registration.update(
             { wallet_amount: newBalance.toFixed(2) },
-            { where: { id: user.id } }
+            { where: { id: comapnyId } }
         );
 
         const formattedDate = moment(add_wallet.createdAt).format('DD-MM-YYYY');
