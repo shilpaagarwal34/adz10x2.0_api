@@ -53,6 +53,36 @@ const resolveRequestedSocietyIds = (body = {}) => {
     return Array.from(ids);
 };
 
+const WEEKDAY_LABELS = {
+    mon: "Mon",
+    tue: "Tue",
+    wed: "Wed",
+    thu: "Thu",
+    fri: "Fri",
+    sat: "Sat",
+    sun: "Sun",
+};
+
+const buildAvailabilityPreview = (card = null) => {
+    if (!card) return null;
+    const weeklyDays = Array.isArray(card.availability_days)
+        ? card.availability_days
+              .map((day) => WEEKDAY_LABELS[day] || day)
+              .filter(Boolean)
+        : [];
+    const monthlyDays = Array.isArray(card.availability_month_days)
+        ? card.availability_month_days
+        : [];
+
+    return {
+        effective_from: card.effective_from || null,
+        effective_to: card.effective_to || null,
+        availability_days: Array.isArray(card.availability_days) ? card.availability_days : [],
+        availability_days_label: weeklyDays,
+        availability_month_days: monthlyDays,
+    };
+};
+
 const getActiveRateCardForDate = async (societyId, mediaType, date) => {
     const result = await getRateCardAvailabilityForDate(societyId, mediaType, date);
     return result.card;
@@ -83,6 +113,7 @@ const getRateCardAvailabilityForDate = async (societyId, mediaType, date) => {
             card: null,
             reason_code: "platform_not_offered",
             reason_message: "Selected media slot is not offered by this society",
+            availability_preview: null,
         };
     }
 
@@ -102,6 +133,7 @@ const getRateCardAvailabilityForDate = async (societyId, mediaType, date) => {
             reason_code: "outside_date_range",
             reason_message:
                 "Selected date is outside the society's available from/to date range",
+            availability_preview: buildAvailabilityPreview(cards[0]),
         };
     }
 
@@ -119,6 +151,7 @@ const getRateCardAvailabilityForDate = async (societyId, mediaType, date) => {
             reason_code: "unavailable_weekday_or_monthday",
             reason_message:
                 "Selected date is not available in the society weekly/monthly schedule",
+            availability_preview: buildAvailabilityPreview(cardsInEffectiveRange[0]),
         };
     }
 
@@ -126,6 +159,7 @@ const getRateCardAvailabilityForDate = async (societyId, mediaType, date) => {
         card: matchedCard,
         reason_code: null,
         reason_message: null,
+        availability_preview: buildAvailabilityPreview(matchedCard),
     };
 };
 
@@ -965,12 +999,14 @@ exports.getSocietiesWithinRadius = async (req, res) => {
             }
 
             let media_rate = null;
+            let availabilityPreview = null;
             if (media_type && isValidMediaType(media_type)) {
                 const availabilityResult = await getRateCardAvailabilityForDate(
                     society.id,
                     media_type,
                     campaign_date
                 );
+                availabilityPreview = availabilityResult?.availability_preview || null;
                 const activeRateCard = availabilityResult?.card || null;
 
                 if (activeRateCard) {
@@ -1032,6 +1068,9 @@ exports.getSocietiesWithinRadius = async (req, res) => {
                 disable_message: disableReasons.join(" | "),
                 disable_reasons: disableReasons,
                 disable_reason_codes: disableReasonCodes,
+                availability_preview: media_rate
+                    ? buildAvailabilityPreview(media_rate)
+                    : availabilityPreview,
                 media_rate,
                 offered_media_types,
             });
