@@ -55,6 +55,16 @@ const Society_Media_Rate_Card = sequelize.define(
       type: DataTypes.DATEONLY,
       allowNull: true,
     },
+    availability_days: {
+      type: DataTypes.JSON,
+      allowNull: false,
+      defaultValue: [],
+    },
+    availability_month_days: {
+      type: DataTypes.JSON,
+      allowNull: false,
+      defaultValue: [],
+    },
     submission_stage: {
       type: DataTypes.ENUM("draft", "submitted"),
       allowNull: false,

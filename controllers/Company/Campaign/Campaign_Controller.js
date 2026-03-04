@@ -16,7 +16,14 @@ const path = require('path');
 const { where, literal, Sequelize } = require('sequelize');
 const { Op,fn, col } = require('sequelize');
 const moment = require('moment-timezone');
-const { MEDIA_TYPES, normalizeMediaType, isValidMediaType, calculateRateBreakup, getMediaPlatformConfig } = require('@helper/mediaRateHelper');
+const {
+    MEDIA_TYPES,
+    normalizeMediaType,
+    isValidMediaType,
+    calculateRateBreakup,
+    getMediaPlatformConfig,
+    isDateAllowedByAvailability,
+} = require('@helper/mediaRateHelper');
 
 const resolveRequestedSocietyIds = (body = {}) => {
     const ids = new Set();
@@ -47,23 +54,79 @@ const resolveRequestedSocietyIds = (body = {}) => {
 };
 
 const getActiveRateCardForDate = async (societyId, mediaType, date) => {
+    const result = await getRateCardAvailabilityForDate(societyId, mediaType, date);
+    return result.card;
+};
+
+const getRateCardAvailabilityForDate = async (societyId, mediaType, date) => {
     const normalized = normalizeMediaType(mediaType);
-    if (!normalized || !isValidMediaType(normalized)) return null;
+    if (!normalized || !isValidMediaType(normalized)) {
+        return {
+            card: null,
+            reason_code: "invalid_media_type",
+            reason_message: "Invalid media slot selected",
+        };
+    }
 
     const targetDate = date || moment().format("YYYY-MM-DD");
-    return Society_Media_Rate_Card.findOne({
+    const cards = await Society_Media_Rate_Card.findAll({
         where: {
             society_id: societyId,
             media_type: normalized,
             status: "active",
-            effective_from: { [Op.lte]: targetDate },
-            [Op.or]: [
-                { effective_to: null },
-                { effective_to: { [Op.gte]: targetDate } },
-            ],
         },
         order: [["effective_from", "DESC"], ["id", "DESC"]],
     });
+
+    if (!cards.length) {
+        return {
+            card: null,
+            reason_code: "platform_not_offered",
+            reason_message: "Selected media slot is not offered by this society",
+        };
+    }
+
+    const cardsInEffectiveRange = cards.filter((card) => {
+        const fromDate = card?.effective_from
+            ? moment(card.effective_from).format("YYYY-MM-DD")
+            : null;
+        const toDate = card?.effective_to
+            ? moment(card.effective_to).format("YYYY-MM-DD")
+            : null;
+        return (!fromDate || fromDate <= targetDate) && (!toDate || toDate >= targetDate);
+    });
+
+    if (!cardsInEffectiveRange.length) {
+        return {
+            card: null,
+            reason_code: "outside_date_range",
+            reason_message:
+                "Selected date is outside the society's available from/to date range",
+        };
+    }
+
+    const matchedCard = cardsInEffectiveRange.find((card) =>
+        isDateAllowedByAvailability(
+            targetDate,
+            card.availability_days,
+            card.availability_month_days
+        )
+    );
+
+    if (!matchedCard) {
+        return {
+            card: null,
+            reason_code: "unavailable_weekday_or_monthday",
+            reason_message:
+                "Selected date is not available in the society weekly/monthly schedule",
+        };
+    }
+
+    return {
+        card: matchedCard,
+        reason_code: null,
+        reason_message: null,
+    };
 };
 
 const getPlatformRulesFromConfig = (campaignConfig = null) => {
@@ -91,6 +154,60 @@ const fetchEffectivePlatformRules = async () => {
         order: [['createdAt', 'ASC']],
     });
     return getPlatformRulesFromConfig(campaignConfig);
+};
+
+const findConflictingBookings = async ({
+    selectedSocietyIds = [],
+    mediaType,
+    campaignDate,
+    excludeCampaignId = null,
+}) => {
+    if (!selectedSocietyIds.length || !mediaType || !campaignDate) return [];
+
+    const conflictWhere = {
+        society_id: { [Op.in]: selectedSocietyIds },
+        media_type: mediaType,
+        status: "active",
+        campaign_status: { [Op.notIn]: ["cancelled", "reject"] },
+    };
+
+    if (excludeCampaignId) {
+        conflictWhere.campaign_id = { [Op.ne]: Number(excludeCampaignId) };
+    }
+
+    const campaigns = await Campaign.findAll({
+        where: {
+            status: "active",
+            campaign_status: { [Op.notIn]: ["cancelled", "reject"] },
+            [Op.and]: [where(fn("DATE", col("campaign_date")), campaignDate)],
+        },
+        attributes: ["id", "id_prifix_campaign"],
+        raw: true,
+    });
+
+    const campaignIds = campaigns.map((c) => c.id);
+    if (!campaignIds.length) return [];
+
+    conflictWhere.campaign_id = excludeCampaignId
+        ? { [Op.in]: campaignIds.filter((id) => Number(id) !== Number(excludeCampaignId)) }
+        : { [Op.in]: campaignIds };
+
+    const conflicts = await Campaign_Log.findAll({
+        where: conflictWhere,
+        attributes: ["campaign_id", "society_id"],
+        raw: true,
+    });
+
+    const campaignRefById = campaigns.reduce((acc, item) => {
+        acc[item.id] = item.id_prifix_campaign || item.id;
+        return acc;
+    }, {});
+
+    return conflicts.map((item) => ({
+        campaign_id: item.campaign_id,
+        campaign_ref: campaignRefById[item.campaign_id] || item.campaign_id,
+        society_id: item.society_id,
+    }));
 };
 
 exports.getCompanySocietyMediaRateCards = async (req, res) => {
@@ -130,13 +247,22 @@ exports.getCompanySocietyMediaRateCards = async (req, res) => {
             where: whereClause,
             order: [["media_type", "ASC"], ["effective_from", "DESC"]],
         });
+        const filteredCards = campaign_date
+            ? cards.filter((card) =>
+                  isDateAllowedByAvailability(
+                      campaign_date,
+                      card.availability_days,
+                      card.availability_month_days
+                  )
+              )
+            : cards;
         const platformRules = await fetchEffectivePlatformRules();
 
         return res.status(200).json({
             status: 200,
             message: "Company media rate cards fetched successfully",
             media_platforms: Object.values(platformRules),
-            data: cards,
+            data: filteredCards,
         });
     } catch (error) {
         return res.status(500).json({
@@ -830,15 +956,22 @@ exports.getSocietiesWithinRadius = async (req, res) => {
 
             const allowed = profile?.ads_per_day ?? 0;
             const disable = used >= allowed;
-            let disable_message = disable ? `Ad limit (${allowed}) reached for this society on ${campaign_date}` : '';
+            const disableReasons = [];
+            const disableReasonCodes = [];
+
+            if (disable) {
+                disableReasons.push(`Ad limit (${allowed}) reached for this society on ${campaign_date}`);
+                disableReasonCodes.push("ad_limit_reached");
+            }
 
             let media_rate = null;
             if (media_type && isValidMediaType(media_type)) {
-                const activeRateCard = await getActiveRateCardForDate(
+                const availabilityResult = await getRateCardAvailabilityForDate(
                     society.id,
                     media_type,
                     campaign_date
                 );
+                const activeRateCard = availabilityResult?.card || null;
 
                 if (activeRateCard) {
                     media_rate = {
@@ -850,22 +983,45 @@ exports.getSocietiesWithinRadius = async (req, res) => {
                         company_rate: Number(activeRateCard.company_rate) || 0,
                         effective_from: activeRateCard.effective_from,
                         effective_to: activeRateCard.effective_to,
+                        availability_days: Array.isArray(activeRateCard.availability_days)
+                            ? activeRateCard.availability_days
+                            : [],
+                        availability_month_days: Array.isArray(activeRateCard.availability_month_days)
+                            ? activeRateCard.availability_month_days
+                            : [],
                     };
                 } else {
                     media_rate = null;
-                    disable_message = disable_message
-                        ? `${disable_message} | Selected media slot is not offered by this society`
-                        : "Selected media slot is not offered by this society";
+                    disableReasons.push(
+                        availabilityResult?.reason_message ||
+                            "Selected media slot is not offered by this society on chosen date"
+                    );
+                    if (availabilityResult?.reason_code) {
+                        disableReasonCodes.push(availabilityResult.reason_code);
+                    }
                 }
             }
 
-            // All media platforms this society offers (for display on company portal)
-            const offeredCards = await Society_Media_Rate_Card.findAll({
-                where: { society_id: society.id, status: 'active' },
-                attributes: ['media_type'],
-                raw: true,
-            });
-            const offered_media_types = [...new Set((offeredCards || []).map((c) => c.media_type).filter(Boolean))];
+            // All media platforms this society offers (respecting selected campaign date availability)
+            let offered_media_types = [];
+            if (campaign_date) {
+                const availableChecks = await Promise.all(
+                    MEDIA_TYPES.map(async (type) => ({
+                        media_type: type,
+                        card: await getActiveRateCardForDate(society.id, type, campaign_date),
+                    }))
+                );
+                offered_media_types = availableChecks
+                    .filter((item) => item.card)
+                    .map((item) => item.media_type);
+            } else {
+                const offeredCards = await Society_Media_Rate_Card.findAll({
+                    where: { society_id: society.id, status: 'active' },
+                    attributes: ['media_type'],
+                    raw: true,
+                });
+                offered_media_types = [...new Set((offeredCards || []).map((c) => c.media_type).filter(Boolean))];
+            }
 
             societiesWithinRadius.push({
                 society,
@@ -873,7 +1029,9 @@ exports.getSocietiesWithinRadius = async (req, res) => {
                 used,
                 allowed,
                 disable: disable || (media_type && !media_rate),
-                disable_message,
+                disable_message: disableReasons.join(" | "),
+                disable_reasons: disableReasons,
+                disable_reason_codes: disableReasonCodes,
                 media_rate,
                 offered_media_types,
             });
@@ -962,6 +1120,21 @@ exports.createOrUpdateCampaign = async (req, res) => {
         }
 
         const selectedSocietyIds = resolveRequestedSocietyIds(req.body);
+        const conflicts = await findConflictingBookings({
+            selectedSocietyIds,
+            mediaType: normalizedMediaType,
+            campaignDate: campaign_date,
+            excludeCampaignId: id || null,
+        });
+        if (conflicts.length > 0) {
+            return res.status(400).json({
+                status: 400,
+                message:
+                    "Another non-cancelled campaign already exists for the same society, platform and date",
+                conflicts,
+            });
+        }
+
         const pricingBySociety = {};
         let resolvedCampaignAmount = Number(campaign_amount) || 0;
 

@@ -14,6 +14,8 @@ const {
   calculateRateBreakup,
   getMediaPlatformConfig,
   SOCIETY_APPENDABLE_TERMS_OPTIONS,
+  normalizeAvailabilityDays,
+  normalizeAvailabilityMonthDays,
 } = require('@helper/mediaRateHelper');
 const { Op, where } = require("sequelize");
 const path = require('path');
@@ -461,6 +463,10 @@ exports.upsertSocietyMediaRateCards = async (req, res) => {
         : [];
       const effectiveFrom = card.effective_from || new Date().toISOString().slice(0, 10);
       const effectiveTo = card.effective_to || null;
+      const availabilityDays = normalizeAvailabilityDays(card.availability_days);
+      const availabilityMonthDays = normalizeAvailabilityMonthDays(
+        card.availability_month_days
+      );
       const incomingWhatsappDetails =
         card.whatsapp_details && typeof card.whatsapp_details === "object"
           ? card.whatsapp_details
@@ -489,6 +495,26 @@ exports.upsertSocietyMediaRateCards = async (req, res) => {
         return res.status(400).json({
           status: 400,
           message: `Invalid society terms selected for media_type: ${mediaType}`,
+        });
+      }
+
+      if (
+        Array.isArray(card.availability_days) &&
+        availabilityDays.length !== card.availability_days.length
+      ) {
+        return res.status(400).json({
+          status: 400,
+          message: `Invalid weekly availability days for media_type: ${mediaType}. Use mon,tue,wed,thu,fri,sat,sun`,
+        });
+      }
+
+      if (
+        Array.isArray(card.availability_month_days) &&
+        availabilityMonthDays.length !== card.availability_month_days.length
+      ) {
+        return res.status(400).json({
+          status: 400,
+          message: `Invalid monthly availability dates for media_type: ${mediaType}. Allowed values are 1-31`,
         });
       }
 
@@ -584,6 +610,8 @@ exports.upsertSocietyMediaRateCards = async (req, res) => {
             whatsapp_details: normalizedWhatsappDetails,
             effective_from: effectiveFrom,
             effective_to: effectiveTo,
+            availability_days: availabilityDays,
+            availability_month_days: availabilityMonthDays,
             submission_stage: isDraftSave ? "draft" : "submitted",
             modified_by: req.user.id,
             modified_type: createdType,
@@ -606,6 +634,8 @@ exports.upsertSocietyMediaRateCards = async (req, res) => {
           whatsapp_details: normalizedWhatsappDetails,
           effective_from: effectiveFrom,
           effective_to: effectiveTo,
+          availability_days: availabilityDays,
+          availability_month_days: availabilityMonthDays,
           submission_stage: isDraftSave ? "draft" : "submitted",
           created_by: req.user.id,
           created_type: createdType,

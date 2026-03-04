@@ -64,6 +64,8 @@ const SOCIETY_APPENDABLE_TERMS_OPTIONS = [
   "Display schedule may be adjusted due to maintenance or emergencies.",
 ];
 
+const WEEKDAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+
 function normalizeMediaType(mediaType) {
   return (mediaType || "").toString().trim().toLowerCase();
 }
@@ -114,13 +116,63 @@ function getMediaPlatformConfig(mediaType) {
   );
 }
 
+function normalizeAvailabilityDays(days) {
+  if (!Array.isArray(days)) return [];
+  return Array.from(
+    new Set(
+      days
+        .map((d) => (d || "").toString().trim().toLowerCase())
+        .filter((d) => WEEKDAY_KEYS.includes(d))
+    )
+  );
+}
+
+function normalizeAvailabilityMonthDays(days) {
+  if (!Array.isArray(days)) return [];
+  return Array.from(
+    new Set(
+      days
+        .map((d) => Number(d))
+        .filter((d) => Number.isInteger(d) && d >= 1 && d <= 31)
+    )
+  ).sort((a, b) => a - b);
+}
+
+function isDateAllowedByAvailability(
+  targetDate,
+  availabilityDays = [],
+  availabilityMonthDays = []
+) {
+  const d = new Date(targetDate);
+  if (Number.isNaN(d.getTime())) return false;
+
+  const normalizedDays = normalizeAvailabilityDays(availabilityDays);
+  const normalizedMonthDays = normalizeAvailabilityMonthDays(availabilityMonthDays);
+
+  if (normalizedDays.length) {
+    const weekday = WEEKDAY_KEYS[d.getDay()];
+    if (!normalizedDays.includes(weekday)) return false;
+  }
+
+  if (normalizedMonthDays.length) {
+    const monthDay = d.getDate();
+    if (!normalizedMonthDays.includes(monthDay)) return false;
+  }
+
+  return true;
+}
+
 module.exports = {
   MEDIA_TYPES,
   MEDIA_PLATFORM_CONFIG,
   SOCIETY_APPENDABLE_TERMS_OPTIONS,
+  WEEKDAY_KEYS,
   normalizeMediaType,
   isValidMediaType,
   calculateRateBreakup,
   getPlatformCommissionPct,
   getMediaPlatformConfig,
+  normalizeAvailabilityDays,
+  normalizeAvailabilityMonthDays,
+  isDateAllowedByAvailability,
 };
