@@ -518,6 +518,13 @@ exports.upsertSocietyMediaRateCards = async (req, res) => {
         });
       }
 
+      if (availabilityDays.length > 0 && availabilityMonthDays.length > 0) {
+        return res.status(400).json({
+          status: 400,
+          message: `Select either weekly availability or monthly dates for media_type: ${mediaType}, not both`,
+        });
+      }
+
       if (effectiveTo && effectiveFrom > effectiveTo) {
         return res.status(400).json({
           status: 400,
