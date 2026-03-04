@@ -68,18 +68,24 @@ exports.wallet_Add_Validation = async (req, res) => {
         const userId = req.user.id;
         const userType = req.user_type;
         let comapnyId = null;
-        let comapnyUserId = null;
 
         // Determine company and user IDs
         if (userType === "Company_Admin") {
             const user = await Company_Registration.findOne({ where: { id: userId } });
-            comapnyId = user.id;
+            comapnyId = user?.id || null;
         }
 
         if (userType === "Company_User") {
             const companyUser = await Company_User.findOne({ where: { id: userId } });
-            comapnyId = companyUser.company_id;
-            comapnyUserId = companyUser.id;
+            comapnyId = companyUser?.company_id || null;
+        }
+
+        if (!comapnyId) {
+            return res.status(400).json({
+                status: 400,
+                isAllowed: false,
+                message: "Company not found for current user"
+            });
         }
 
         // Check if this is the first wallet entry for the company
@@ -91,6 +97,7 @@ exports.wallet_Add_Validation = async (req, res) => {
             if (!amount || parseFloat(amount) < 10000) {
                 return res.status(400).json({
                     status: 400,
+                    isAllowed: false,
                     message: "Minimum wallet amount must be 10,000 for the first entry"
                 });
             }
@@ -100,6 +107,7 @@ exports.wallet_Add_Validation = async (req, res) => {
 
         return res.status(200).json({
             status: 200,
+            isAllowed: true,
             message: "Wallet validation successful",
         });
 
