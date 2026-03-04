@@ -133,19 +133,35 @@ exports.walletDataTable = async (req, res) => {
          // Calculate offset for pagination
          const offset = (page - 1) * limit;
  
-         // Create where clause for filtering
+        // Resolve company id safely from authenticated user
+        let companyId = null;
+        if (req.user_type === 'Company_Admin') {
+            companyId = req.user?.id || null;
+        } else if (req.user_type === 'Company_User') {
+            companyId = req.user?.company_id || null;
+            if (!companyId) {
+                const companyUser = await Company_User.findOne({
+                    where: { id: req.user?.id },
+                    attributes: ['company_id'],
+                });
+                companyId = companyUser?.company_id || null;
+            }
+        }
+
+        if (!companyId) {
+            return res.status(400).json({
+                status: 400,
+                message: "Company not found for current user",
+            });
+        }
+
+        // Create where clause for filtering
          const whereClause = {
+            company_id: companyId,
              status: {
                  [Op.in]: ['active', 'inactive'] // Include only active and inactive
              }
          };
-
-               // Apply company-based filtering
-        if (req.user_type === 'Company_Admin') {
-            whereClause.company_id = req.user.id; // Company_Admin's ID
-        } else if (req.user_type === 'Company_User') {
-            whereClause.company_id = req.user.company_id; // Company_User's company ID
-        }
 
         if (search) {
             whereClause[Op.or] = [
@@ -207,9 +223,10 @@ exports.walletDataTable = async (req, res) => {
              data: formattedWallets
          });
      } catch (err) {
+         console.error("[walletDataTable]", err?.message, err?.stack);
          res.status(500).json({
              status: 500,
-             message: "Failed to fetch Wallets",
+             message: err?.message || "Failed to fetch Wallets",
              error: err.message
          });
      }
