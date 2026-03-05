@@ -660,7 +660,8 @@ exports.campaignDataTableSocietyCampinwise = async (req, res) => {
     }
 
     const campaign = await Campaign.findOne({
-      where: { id: campaignLog.campaign_id, status: 'active' },
+      // Do not hard-block on generic record status here; approval flow depends on campaign_log linkage.
+      where: { id: campaignLog.campaign_id },
       attributes: ['id','campaign_date','id_prifix_campaign']
     });
 
