@@ -346,13 +346,15 @@ exports.getSocietyMediaRateCards = async (req, res) => {
     }
 
     const { date } = req.query;
-    const targetDate = date || new Date().toISOString().slice(0, 10);
+    const targetDate = date || null;
 
     const whereClause = {
       society_id: societyId,
       status: "active",
     };
 
+    // For society edit screen, fetch all active cards by default.
+    // Apply date-range filtering only when caller explicitly asks with ?date=YYYY-MM-DD.
     if (targetDate) {
       whereClause[Op.and] = [
         { effective_from: { [Op.lte]: targetDate } },
