@@ -7,12 +7,17 @@ const  Society_User = require('@models/Society/Users/Society_User_Model');
 const Wallet = require('@models/Company/Wallet/Wallet_Model');
 const Advertisements = require('@models/Society/Advertisement/Advertisement_Model');
 const Master_Admin = require('@models/Admin/Auth/Master_Admin_Model');
+const Campaign_Configuration = require('@models/Admin/Master/Campaign_Configuration_Model');
 const Company_Registration = require('@models/Company/Auth/Company_Registration_Model');
 const Notification = require('@models/Notifications/Notification_Model');
 const path = require('path');
 const { where, literal, Sequelize } = require('sequelize');
 const { Op } = require('sequelize');
 const moment = require('moment-timezone');
+const {
+  normalizeMediaType,
+  getMediaPlatformConfig,
+} = require('@helper/mediaRateHelper');
 const AWS = require('aws-sdk');
 const ses = new AWS.SES({ apiVersion: '2010-12-01' });
 
@@ -21,6 +26,26 @@ AWS.config.update({
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
     region: process.env.AWS_REGION
 })
+
+const getMinActiveDaysForMediaType = async (mediaType) => {
+  const normalizedMediaType = normalizeMediaType(mediaType);
+  const defaults = getMediaPlatformConfig(normalizedMediaType);
+
+  const campaignConfig = await Campaign_Configuration.findOne({
+    attributes: ['platform_rules'],
+    where: { status: 'active' },
+    order: [['createdAt', 'ASC']],
+  });
+
+  const configured = campaignConfig?.platform_rules?.[normalizedMediaType] || {};
+  const configuredDays = Number(configured.min_active_days);
+  const fallbackDays = Number(defaults.min_active_days || defaults.duration_days || 1);
+
+  if (Number.isFinite(configuredDays) && configuredDays > 0) {
+    return configuredDays;
+  }
+  return Number.isFinite(fallbackDays) && fallbackDays > 0 ? fallbackDays : 1;
+};
 
 exports.getSocietyProfileSlotAdvertisement = async (req, res) => {
     try {
@@ -662,7 +687,7 @@ exports.campaignDataTableSocietyCampinwise = async (req, res) => {
     const campaign = await Campaign.findOne({
       // Do not hard-block on generic record status here; approval flow depends on campaign_log linkage.
       where: { id: campaignLog.campaign_id },
-      attributes: ['id','campaign_date','id_prifix_campaign']
+      attributes: ['id','campaign_date','id_prifix_campaign','media_type']
     });
 
     if (!campaign) {
@@ -811,6 +836,7 @@ in your dashboard</p>
 
     }else {
       const hasSlotRange = Boolean(slot_start_time && slot_end_time);
+      const minActiveDays = await getMinActiveDaysForMediaType(campaign?.media_type);
       updatedFields.society_cancel_reason = null;
       updatedFields.approved_date = moment().tz('Asia/Kolkata').toDate();
       updatedFields.society_approved_date = moment().tz('Asia/Kolkata').toDate();
@@ -824,7 +850,10 @@ in your dashboard</p>
           'YYYY-MM-DD HH:mm:ss',
           'Asia/Kolkata'
         );
-        const liveEndDate = liveStartDate.clone().add(24, 'hours');
+        // Duration is inclusive of start date, driven by platform min_active_days.
+        const liveEndDate = liveStartDate
+          .clone()
+          .add(Math.max(minActiveDays - 1, 0), 'days');
         updatedFields.slot_start_time = slot_start_time;
         updatedFields.slot_end_time = slot_end_time;
         updatedFields.live_start_date = liveStartDate.toDate();
@@ -834,7 +863,10 @@ in your dashboard</p>
         const campaignStartDate = moment(campaign.campaign_date)
           .tz('Asia/Kolkata')
           .startOf('day');
-        const campaignEndDate = campaignStartDate.clone().add(24, 'hours');
+        const campaignEndDate = campaignStartDate
+          .clone()
+          .add(Math.max(minActiveDays - 1, 0), 'days')
+          .endOf('day');
         updatedFields.slot_start_time = null;
         updatedFields.slot_end_time = null;
         updatedFields.live_start_date = campaignStartDate.toDate();

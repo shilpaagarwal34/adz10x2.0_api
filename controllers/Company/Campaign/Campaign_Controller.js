@@ -111,6 +111,7 @@ const getRateCardAvailabilityForDate = async (societyId, mediaType, date) => {
     if (!cards.length) {
         return {
             card: null,
+            display_card: null,
             reason_code: "platform_not_offered",
             reason_message: "Selected media slot is not offered by this society",
             availability_preview: null,
@@ -130,6 +131,7 @@ const getRateCardAvailabilityForDate = async (societyId, mediaType, date) => {
     if (!cardsInEffectiveRange.length) {
         return {
             card: null,
+            display_card: cards[0],
             reason_code: "outside_date_range",
             reason_message:
                 "Selected date is outside the society's available from/to date range",
@@ -148,6 +150,7 @@ const getRateCardAvailabilityForDate = async (societyId, mediaType, date) => {
     if (!matchedCard) {
         return {
             card: null,
+            display_card: cardsInEffectiveRange[0],
             reason_code: "unavailable_weekday_or_monthday",
             reason_message:
                 "Selected date is not available in the society weekly/monthly schedule",
@@ -157,6 +160,7 @@ const getRateCardAvailabilityForDate = async (societyId, mediaType, date) => {
 
     return {
         card: matchedCard,
+        display_card: matchedCard,
         reason_code: null,
         reason_message: null,
         availability_preview: buildAvailabilityPreview(matchedCard),
@@ -1000,6 +1004,7 @@ exports.getSocietiesWithinRadius = async (req, res) => {
 
             let media_rate = null;
             let availabilityPreview = null;
+            let isMediaSelectableForDate = true;
             if (media_type && isValidMediaType(media_type)) {
                 const availabilityResult = await getRateCardAvailabilityForDate(
                     society.id,
@@ -1008,31 +1013,35 @@ exports.getSocietiesWithinRadius = async (req, res) => {
                 );
                 availabilityPreview = availabilityResult?.availability_preview || null;
                 const activeRateCard = availabilityResult?.card || null;
+                const displayRateCard =
+                    availabilityResult?.display_card || activeRateCard || null;
 
                 // If society does not offer the selected platform at all, hide it from company list.
                 if (!activeRateCard && availabilityResult?.reason_code === "platform_not_offered") {
                     continue;
                 }
 
-                if (activeRateCard) {
+                if (displayRateCard) {
                     media_rate = {
-                        id: activeRateCard.id,
-                        media_type: activeRateCard.media_type,
-                        society_rate: Number(activeRateCard.society_rate) || 0,
-                        platform_commission_pct: Number(activeRateCard.platform_commission_pct) || 0,
-                        platform_rate: Number(activeRateCard.platform_rate) || 0,
-                        company_rate: Number(activeRateCard.company_rate) || 0,
-                        effective_from: activeRateCard.effective_from,
-                        effective_to: activeRateCard.effective_to,
-                        availability_days: Array.isArray(activeRateCard.availability_days)
-                            ? activeRateCard.availability_days
+                        id: displayRateCard.id,
+                        media_type: displayRateCard.media_type,
+                        society_rate: Number(displayRateCard.society_rate) || 0,
+                        platform_commission_pct: Number(displayRateCard.platform_commission_pct) || 0,
+                        platform_rate: Number(displayRateCard.platform_rate) || 0,
+                        company_rate: Number(displayRateCard.company_rate) || 0,
+                        effective_from: displayRateCard.effective_from,
+                        effective_to: displayRateCard.effective_to,
+                        availability_days: Array.isArray(displayRateCard.availability_days)
+                            ? displayRateCard.availability_days
                             : [],
-                        availability_month_days: Array.isArray(activeRateCard.availability_month_days)
-                            ? activeRateCard.availability_month_days
+                        availability_month_days: Array.isArray(displayRateCard.availability_month_days)
+                            ? displayRateCard.availability_month_days
                             : [],
                     };
-                } else {
-                    media_rate = null;
+                }
+
+                if (!activeRateCard) {
+                    isMediaSelectableForDate = false;
                     disableReasons.push(
                         availabilityResult?.reason_message ||
                             "Selected media slot is not offered by this society on chosen date"
@@ -1069,7 +1078,7 @@ exports.getSocietiesWithinRadius = async (req, res) => {
                 profile,
                 used,
                 allowed,
-                disable: disable || (media_type && !media_rate),
+                disable: disable || (media_type && !isMediaSelectableForDate),
                 disable_message: disableReasons.join(" | "),
                 disable_reasons: disableReasons,
                 disable_reason_codes: disableReasonCodes,

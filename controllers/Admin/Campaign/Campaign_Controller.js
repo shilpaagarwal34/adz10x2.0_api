@@ -18,6 +18,10 @@ const path = require('path');
 const { where, literal, Sequelize } = require('sequelize');
 const { Op, fn, col } = require('sequelize');
 const moment = require('moment-timezone');
+const {
+  normalizeMediaType,
+  getMediaPlatformConfig,
+} = require('@helper/mediaRateHelper');
 
 // Configure AWS SES
 
@@ -28,6 +32,25 @@ AWS.config.update({
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
     region: process.env.AWS_REGION
 })
+
+const getMinActiveDaysForMediaType = async (mediaType) => {
+  const normalizedMediaType = normalizeMediaType(mediaType);
+  const defaults = getMediaPlatformConfig(normalizedMediaType);
+  const campaignConfig = await Campaign_Configuration.findOne({
+    attributes: ['platform_rules'],
+    where: { status: 'active' },
+    order: [['createdAt', 'ASC']],
+  });
+
+  const configured = campaignConfig?.platform_rules?.[normalizedMediaType] || {};
+  const configuredDays = Number(configured.min_active_days);
+  const fallbackDays = Number(defaults.min_active_days || defaults.duration_days || 1);
+
+  if (Number.isFinite(configuredDays) && configuredDays > 0) {
+    return configuredDays;
+  }
+  return Number.isFinite(fallbackDays) && fallbackDays > 0 ? fallbackDays : 1;
+};
 
 exports.getSocietyProfileAdminSlot = async (req, res) => {
     try {
@@ -989,7 +1012,7 @@ in your dashboard.</p>
 
     const campaign = await Campaign.findOne({
       where: { id: campaignLog.campaign_id, status: 'active' },
-      attributes: ['id','campaign_date']
+      attributes: ['id','campaign_date','media_type']
     });
 
     if (!campaign) {
@@ -1077,6 +1100,7 @@ in your dashboard.</p>
         });
 
     }else {
+      const minActiveDays = await getMinActiveDaysForMediaType(campaign?.media_type);
      
       const campaignDateIST = moment(campaign.campaign_date).tz('Asia/Kolkata'); // retain timezone
       
@@ -1086,7 +1110,10 @@ in your dashboard.</p>
           'Asia/Kolkata'
         );
 
-      const liveEndDate = liveStartDate.clone().add(24, 'hours');
+      // Duration is inclusive of start date, driven by platform min_active_days.
+      const liveEndDate = liveStartDate
+        .clone()
+        .add(Math.max(minActiveDays - 1, 0), 'days');
 
       updatedFields.admin_cancel_reason = null;
       updatedFields.slot_start_time = slot_start_time;
