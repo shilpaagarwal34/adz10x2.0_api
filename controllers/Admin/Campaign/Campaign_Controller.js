@@ -1831,6 +1831,7 @@ exports.campaignRejectsDateCrossed = async (req, res) => {
                       
 
         let updatedCount = 0;
+        let autoCompletedLogsCount = 0;
         const affectedCampaignIds = new Set();
 
         // Step 3: Loop through each campaign
@@ -1991,7 +1992,40 @@ exports.campaignRejectsDateCrossed = async (req, res) => {
         affectedCampaignIds.add(campaignId);
       }
 
-      // Step 5: Update main Campaign if all logs are rejected
+      // Step 5: Auto-complete approved logs whose live window has ended.
+      const endedLiveLogs = await Campaign_Log.findAll({
+        where: {
+          status: { [Op.in]: ['active', 'inactive'] },
+          campaign_status: 'approved',
+          admin_approved_status: 'approved',
+          society_approved_status: 'approved',
+          live_end_date: { [Op.lt]: currentIST.toDate() }
+        },
+        attributes: ['id', 'campaign_id']
+      });
+
+      for (const log of endedLiveLogs) {
+        const [count] = await Campaign_Log.update(
+          {
+            campaign_status: 'completed',
+            report_status: 'approved',
+            completed_date: moment().tz('Asia/Kolkata').toDate()
+          },
+          {
+            where: {
+              id: log.id,
+              campaign_status: 'approved'
+            }
+          }
+        );
+
+        if (count > 0) {
+          autoCompletedLogsCount += 1;
+          affectedCampaignIds.add(log.campaign_id);
+        }
+      }
+
+      // Step 6: Update main Campaign status for affected campaigns.
       for (const campaignId of affectedCampaignIds) {
         const allLogs = await Campaign_Log.findAll({
           where: { campaign_id: campaignId },
@@ -1999,10 +2033,18 @@ exports.campaignRejectsDateCrossed = async (req, res) => {
         });
 
         const allRejected = allLogs.every(log => log.campaign_status === 'reject');
+        const allClosed = allLogs.every(log =>
+          ['reject', 'completed'].includes(log.campaign_status)
+        );
 
         if (allRejected) {
           await Campaign.update(
             { campaign_status: 'reject' },
+            { where: { id: campaignId } }
+          );
+        } else if (allClosed) {
+          await Campaign.update(
+            { campaign_status: 'completed' },
             { where: { id: campaignId } }
           );
         }
@@ -2010,7 +2052,7 @@ exports.campaignRejectsDateCrossed = async (req, res) => {
 
     return res.status(200).json({
       status: 200,
-      message: `${updatedCount} campaign(s) auto-rejected and refunded.`
+      message: `${updatedCount} campaign(s) auto-rejected and ${autoCompletedLogsCount} ad log(s) auto-completed.`
     });
   } catch (error) {
     return res.status(500).json({

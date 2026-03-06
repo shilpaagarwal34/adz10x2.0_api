@@ -830,11 +830,15 @@ in your dashboard</p>
         updatedFields.live_start_date = liveStartDate.toDate();
         updatedFields.live_end_date = liveEndDate.toDate();
       } else {
-        // Time slot is optional for society approval.
+        // If no slot is provided, start live window from campaign date start (IST).
+        const campaignStartDate = moment(campaign.campaign_date)
+          .tz('Asia/Kolkata')
+          .startOf('day');
+        const campaignEndDate = campaignStartDate.clone().add(24, 'hours');
         updatedFields.slot_start_time = null;
         updatedFields.slot_end_time = null;
-        updatedFields.live_start_date = null;
-        updatedFields.live_end_date = null;
+        updatedFields.live_start_date = campaignStartDate.toDate();
+        updatedFields.live_end_date = campaignEndDate.toDate();
       }
 
       // ✅ Set campaign_status to 'approve' only if society has approved
