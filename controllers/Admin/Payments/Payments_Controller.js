@@ -5,6 +5,8 @@ const  Society_User = require('@models/Society/Users/Society_User_Model');
 const Society_Withdraw_Payments = require('@models/Society/Payments/Withdraw_Model');
 const Master_Admin = require('@models/Admin/Auth/Master_Admin_Model');
 const Society_Wallet_Payment = require('@models/Society/Payments/Society_Wallet_Model'); 
+const Campaign = require('@models/Company/Campaign/Campaign_Model');
+const Campaign_Log = require('@models/Company/Campaign/Campaign_Log_Model');
 const City = require('@models/Admin/Master/City_Model');
 const Notification = require('@models/Notifications/Notification_Model');
 const { Op, fn, col, where, literal, NUMBER,Sequelize, cast } = require('sequelize');
@@ -680,6 +682,408 @@ exports.updateWithdrawalAdmin = async (req, res) => {
         return res.status(500).json({
             status: 500,
             message: "Failed to update withdrawal",
+            error: error.message
+        });
+    }
+};
+
+const toNumber = (value) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const buildSettlementWhereClause = (status) => {
+    const whereClause = {
+        status: { [Op.in]: ['active', 'inactive'] },
+        campaign_status: 'completed',
+        admin_approved_status: 'approved',
+        society_approved_status: 'approved',
+        [Op.or]: [
+            { refund_status: { [Op.ne]: 'refund' } },
+            { refund_status: null }
+        ]
+    };
+
+    if (status === 'pending' || status === 'paid') {
+        whereClause.__settlement_status = status;
+    }
+
+    return whereClause;
+};
+
+exports.campaignSettlementSummary = async (req, res) => {
+    try {
+        const whereClause = buildSettlementWhereClause();
+        delete whereClause.__settlement_status;
+
+        const campaignLogs = await Campaign_Log.findAll({
+            where: whereClause,
+            attributes: ['id', 'campaign_ads_amount', 'society_rate_snapshot']
+        });
+
+        const logIds = campaignLogs.map((log) => log.id);
+
+        const settlements = logIds.length
+            ? await Society_Wallet_Payment.findAll({
+                where: {
+                    campaign_log_id: { [Op.in]: logIds },
+                    wallet_type: 'credit',
+                    status: { [Op.in]: ['active', 'inactive'] }
+                },
+                attributes: ['campaign_log_id', 'amount']
+            })
+            : [];
+
+        const settlementMap = new Map(
+            settlements.map((entry) => [entry.campaign_log_id, toNumber(entry.amount)])
+        );
+
+        let platformHoldingAmount = 0;
+        let platformRevenueAmount = 0;
+        let societyTransferredAmount = 0;
+        let pendingDefaultTransferAmount = 0;
+
+        for (const log of campaignLogs) {
+            const companyAmount = toNumber(log.campaign_ads_amount);
+            const defaultSocietyAmount = Math.min(
+                companyAmount,
+                Math.max(0, toNumber(log.society_rate_snapshot || log.campaign_ads_amount))
+            );
+            const transferredAmount = Math.min(companyAmount, settlementMap.get(log.id) || 0);
+            const platformAmount = Math.max(0, companyAmount - transferredAmount);
+
+            if (settlementMap.has(log.id)) {
+                platformRevenueAmount += platformAmount;
+                societyTransferredAmount += transferredAmount;
+            } else {
+                platformHoldingAmount += companyAmount;
+                pendingDefaultTransferAmount += defaultSocietyAmount;
+            }
+        }
+
+        return res.status(200).json({
+            status: 200,
+            message: 'Campaign settlement summary fetched successfully',
+            data: {
+                totalCompletedAds: campaignLogs.length,
+                pendingSettlementAds: campaignLogs.length - settlements.length,
+                settledAds: settlements.length,
+                platform_holding_amount: Number(platformHoldingAmount.toFixed(2)),
+                platform_revenue_amount: Number(platformRevenueAmount.toFixed(2)),
+                society_transferred_amount: Number(societyTransferredAmount.toFixed(2)),
+                pending_default_transfer_amount: Number(pendingDefaultTransferAmount.toFixed(2))
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: 500,
+            message: 'Failed to fetch campaign settlement summary',
+            error: error.message
+        });
+    }
+};
+
+exports.campaignSettlementDataTable = async (req, res) => {
+    try {
+        const page = parseInt(req.query.page, 10) || 1;
+        const limit = parseInt(req.query.limit, 10) || 20;
+        const offset = (page - 1) * limit;
+
+        const {
+            search = '',
+            status = '',
+            society_id = '',
+            company_id = ''
+        } = req.query;
+
+        const whereClause = buildSettlementWhereClause(status);
+        const settlementStatus = whereClause.__settlement_status;
+        delete whereClause.__settlement_status;
+
+        if (society_id) whereClause.society_id = Number(society_id);
+        if (company_id) whereClause.company_id = Number(company_id);
+
+        const allSettlementRows = await Society_Wallet_Payment.findAll({
+            where: {
+                wallet_type: 'credit',
+                campaign_log_id: { [Op.ne]: null },
+                status: { [Op.in]: ['active', 'inactive'] }
+            },
+            attributes: ['campaign_log_id', 'amount', 'createdAt']
+        });
+        const settlementByLog = new Map(
+            allSettlementRows.map((row) => [row.campaign_log_id, row])
+        );
+        const settledLogIds = allSettlementRows.map((row) => row.campaign_log_id);
+
+        if (settlementStatus === 'paid') {
+            whereClause.id = settledLogIds.length ? { [Op.in]: settledLogIds } : -1;
+        } else if (settlementStatus === 'pending') {
+            whereClause.id = settledLogIds.length ? { [Op.notIn]: settledLogIds } : { [Op.ne]: null };
+        }
+
+        const { count, rows } = await Campaign_Log.findAndCountAll({
+            where: whereClause,
+            attributes: [
+                'id',
+                'campaign_id',
+                'id_prifix_campaign_ads',
+                'media_type',
+                'campaign_ads_amount',
+                'society_rate_snapshot',
+                'company_id',
+                'society_id',
+                'completed_date',
+                'createdAt'
+            ],
+            order: [['id', 'DESC']],
+            offset,
+            limit
+        });
+
+        const societyIds = [...new Set(rows.map((row) => row.society_id).filter(Boolean))];
+        const companyIds = [...new Set(rows.map((row) => row.company_id).filter(Boolean))];
+        const campaignIds = [...new Set(rows.map((row) => row.campaign_id).filter(Boolean))];
+
+        const [societies, companies, campaigns] = await Promise.all([
+            Society_Registration.findAll({
+                where: { id: { [Op.in]: societyIds } },
+                attributes: ['id', 'society_name', 'id_prifix_society']
+            }),
+            Company_Registration.findAll({
+                where: { id: { [Op.in]: companyIds } },
+                attributes: ['id', 'company_name', 'id_prifix_company']
+            }),
+            Campaign.findAll({
+                where: { id: { [Op.in]: campaignIds } },
+                attributes: ['id', 'id_prifix_campaign', 'campaign_name', 'campaign_date']
+            })
+        ]);
+
+        const societyMap = new Map(societies.map((s) => [s.id, s]));
+        const companyMap = new Map(companies.map((c) => [c.id, c]));
+        const campaignMap = new Map(campaigns.map((c) => [c.id, c]));
+
+        const normalizedSearch = String(search || '').trim().toLowerCase();
+
+        let data = rows.map((row) => {
+            const log = row.toJSON();
+            const settlement = settlementByLog.get(log.id);
+            const companyAmount = toNumber(log.campaign_ads_amount);
+            const defaultSocietyAmount = Math.min(
+                companyAmount,
+                Math.max(0, toNumber(log.society_rate_snapshot || log.campaign_ads_amount))
+            );
+            const transferredAmount = settlement ? toNumber(settlement.amount) : 0;
+
+            const society = societyMap.get(log.society_id);
+            const company = companyMap.get(log.company_id);
+            const campaign = campaignMap.get(log.campaign_id);
+
+            return {
+                id: log.id,
+                campaign_log_id: log.id,
+                campaign_log_code: log.id_prifix_campaign_ads,
+                media_type: log.media_type || null,
+                campaign_id: log.campaign_id,
+                campaign_code: campaign?.id_prifix_campaign || null,
+                campaign_name: campaign?.campaign_name || null,
+                campaign_date: campaign?.campaign_date || null,
+                company_id: log.company_id,
+                company_name: company?.company_name || null,
+                company_code: company?.id_prifix_company || null,
+                society_id: log.society_id,
+                society_name: society?.society_name || null,
+                society_code: society?.id_prifix_society || null,
+                company_amount: Number(companyAmount.toFixed(2)),
+                default_society_amount: Number(defaultSocietyAmount.toFixed(2)),
+                transferred_amount: Number(transferredAmount.toFixed(2)),
+                platform_amount: Number(Math.max(0, companyAmount - transferredAmount).toFixed(2)),
+                settlement_status: settlement ? 'paid' : 'pending',
+                completed_date: log.completed_date,
+                transferred_at: settlement?.createdAt || null
+            };
+        });
+
+        if (normalizedSearch) {
+            data = data.filter((item) => {
+                const haystack = [
+                    item.campaign_log_code,
+                    item.campaign_code,
+                    item.campaign_name,
+                    item.company_name,
+                    item.company_code,
+                    item.society_name,
+                    item.society_code
+                ]
+                    .filter(Boolean)
+                    .join(' ')
+                    .toLowerCase();
+                return haystack.includes(normalizedSearch);
+            });
+        }
+
+        return res.status(200).json({
+            status: 200,
+            message: 'Campaign settlements fetched successfully',
+            total: count,
+            page,
+            limit,
+            data
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: 500,
+            message: 'Failed to fetch campaign settlements',
+            error: error.message
+        });
+    }
+};
+
+exports.transferCampaignSettlement = async (req, res) => {
+    const transaction = await sequelize.transaction();
+    try {
+        const userId = req.user?.id || null;
+        const { campaign_log_id, transfer_amount, remark } = req.body;
+
+        if (!campaign_log_id) {
+            await transaction.rollback();
+            return res.status(400).json({ status: 400, message: 'campaign_log_id is required' });
+        }
+
+        const campaignLog = await Campaign_Log.findOne({
+            where: {
+                id: campaign_log_id,
+                status: { [Op.in]: ['active', 'inactive'] },
+                campaign_status: 'completed',
+                admin_approved_status: 'approved',
+                society_approved_status: 'approved',
+                [Op.or]: [
+                    { refund_status: { [Op.ne]: 'refund' } },
+                    { refund_status: null }
+                ]
+            },
+            attributes: [
+                'id',
+                'campaign_id',
+                'company_id',
+                'society_id',
+                'campaign_ads_amount',
+                'society_rate_snapshot',
+                'id_prifix_campaign_ads'
+            ],
+            transaction
+        });
+
+        if (!campaignLog) {
+            await transaction.rollback();
+            return res.status(404).json({ status: 404, message: 'Eligible completed campaign log not found' });
+        }
+
+        const existingSettlement = await Society_Wallet_Payment.findOne({
+            where: {
+                campaign_log_id,
+                wallet_type: 'credit',
+                status: { [Op.in]: ['active', 'inactive'] }
+            },
+            transaction
+        });
+
+        if (existingSettlement) {
+            await transaction.rollback();
+            return res.status(400).json({ status: 400, message: 'Settlement already transferred for this campaign log' });
+        }
+
+        const companyAmount = toNumber(campaignLog.campaign_ads_amount);
+        const defaultAmount = Math.min(
+            companyAmount,
+            Math.max(0, toNumber(campaignLog.society_rate_snapshot || campaignLog.campaign_ads_amount))
+        );
+        const finalTransferAmount = transfer_amount === undefined || transfer_amount === null || transfer_amount === ''
+            ? defaultAmount
+            : toNumber(transfer_amount);
+
+        if (finalTransferAmount <= 0) {
+            await transaction.rollback();
+            return res.status(400).json({ status: 400, message: 'transfer_amount must be greater than 0' });
+        }
+
+        if (finalTransferAmount > companyAmount) {
+            await transaction.rollback();
+            return res.status(400).json({ status: 400, message: 'transfer_amount cannot exceed collected company amount' });
+        }
+
+        const society = await Society_Registration.findOne({
+            where: { id: campaignLog.society_id },
+            attributes: ['id', 'society_wallet_amount', 'society_name'],
+            transaction
+        });
+
+        if (!society) {
+            await transaction.rollback();
+            return res.status(404).json({ status: 404, message: 'Society not found' });
+        }
+
+        const campaign = await Campaign.findOne({
+            where: { id: campaignLog.campaign_id },
+            attributes: ['id_prifix_campaign'],
+            transaction
+        });
+
+        const previousBalance = toNumber(society.society_wallet_amount);
+        const updatedBalance = previousBalance + finalTransferAmount;
+        const platformAmount = Math.max(0, companyAmount - finalTransferAmount);
+
+        await Society_Registration.update(
+            { society_wallet_amount: updatedBalance },
+            { where: { id: society.id }, transaction }
+        );
+
+        await Society_Wallet_Payment.create({
+            society_id: campaignLog.society_id,
+            company_id: campaignLog.company_id,
+            campaign_id: campaignLog.campaign_id,
+            campaign_log_id: campaignLog.id,
+            wallet_type: 'credit',
+            amount: finalTransferAmount,
+            total_amount: updatedBalance,
+            balance: previousBalance,
+            payment_status: 'paid',
+            transaction_id: `STL${Date.now()}`,
+            description: `Admin settlement transfer for campaign #${campaign?.id_prifix_campaign || campaignLog.campaign_id} ad #${campaignLog.id_prifix_campaign_ads}. Platform retained ₹${platformAmount.toFixed(2)}.${remark ? ` Remark: ${remark}` : ''}`,
+            created_ip_address: req.ip,
+            created_by: userId,
+            created_type: 'Admin'
+        }, { transaction });
+
+        await Notification.create({
+            society_ids: [campaignLog.society_id],
+            message: `Settlement credited for campaign #${campaign?.id_prifix_campaign || campaignLog.campaign_id} and ad #${campaignLog.id_prifix_campaign_ads}. Amount: ₹${finalTransferAmount.toFixed(2)}`,
+            from: 'admin',
+            to: 'society',
+            notify_type: 'individual',
+            created_ip_address: req.ip
+        }, { transaction });
+
+        await transaction.commit();
+
+        return res.status(200).json({
+            status: 200,
+            message: 'Settlement transferred to society wallet successfully',
+            data: {
+                campaign_log_id: campaignLog.id,
+                company_amount: Number(companyAmount.toFixed(2)),
+                transferred_amount: Number(finalTransferAmount.toFixed(2)),
+                platform_amount: Number(platformAmount.toFixed(2)),
+                society_wallet_before: Number(previousBalance.toFixed(2)),
+                society_wallet_after: Number(updatedBalance.toFixed(2))
+            }
+        });
+    } catch (error) {
+        await transaction.rollback();
+        return res.status(500).json({
+            status: 500,
+            message: 'Failed to transfer settlement',
             error: error.message
         });
     }

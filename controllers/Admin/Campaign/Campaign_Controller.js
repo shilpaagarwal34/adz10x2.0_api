@@ -1565,119 +1565,9 @@ in your dashboard</p>
               campaignUpdated = true;
             }
 
-          const campaignLogs_Id = await Campaign_Log.findOne({
-            where: { id: campaign_log_id },
-            attributes: ['campaign_type','campaign_ads_amount', 'id']
-          });
-
-          // Fetch society data
-          let societyData = await Society_Registration.findOne({
-            where: { id: society_id },
-            attributes: [
-              'society_commission',
-              'society_brand_promotion',
-              'society_lead_generation',
-              'society_survey',
-              'society_wallet_amount'
-            ]
-          });
-
-                  // 1. Fetch previous balance before update (you already have it from societyData)
-          const previousBalance = societyData.society_wallet_amount || 0;
-
-          let commissionType = '';
-          let baseAmount = 0;
-
-          if (societyData) {
-            commissionType = societyData.society_commission;
-
-            // Get base amount based on campaign type
-            switch (campaignLogs_Id.campaign_type) {
-              case 'brand_promotion':
-                baseAmount = societyData.society_brand_promotion || 0;
-                break;
-              case 'lead_generation':
-                baseAmount = societyData.society_lead_generation || 0;
-                break;
-              case 'survey':
-                baseAmount = societyData.society_survey || 0;
-                break;
-            }
-          } else {
-            // Fallback if Society_Registration not found
-            const campaign = await Campaign_Configuration.findOne({
-              where: { status: 'active' },
-              order: [['id', 'ASC']],
-              attributes: [
-                'society_commission',
-                'society_brand_promotion',
-                'society_lead_generation',
-                'society_survey'
-              ]
-            });
-
-            if (!campaign) {
-              return res.status(404).json({ status: 404, message: 'Campaign not found' });
-            }
-
-            commissionType = campaign.society_commission;
-
-            switch (campaignLogs_Id.campaign_type) {
-              case 'brand_promotion':
-                baseAmount = campaign.society_brand_promotion || 0;
-                break;
-              case 'lead_generation':
-                baseAmount = campaign.society_lead_generation || 0;
-                break;
-              case 'survey':
-                baseAmount = campaign.society_survey || 0;
-                break;
-            }
-
-            societyData = { society_wallet_amount: 0 }; // assume zero if not found
-          }
-
         if (campaign_status === 'completed') {
-
-          // Calculate commission
-          let commission = 0;
-          if (commissionType === '%') {
-            // Calculate based on campaign_ads_amount and percentage
-           commission = (campaignLogs_Id.campaign_ads_amount * baseAmount) / 100;
-            // commission = (baseAmount * 10) / 100; // use 10% or change logic to dynamic % if needed
-          } else if (commissionType === 'INR') {
-            commission = baseAmount; // flat INR value
-          }
-
-          // Update society_wallet_amount
-          const updatedAmount = (societyData.society_wallet_amount || 0) + commission;
-
-         let society_wallet_amount_add =  await Society_Registration.update(
-            { society_wallet_amount: updatedAmount },
-            { where: { id: society_id } }
-          );
-
-          // Check if wallet log already exists for this campaign_log_id
-      const existingWalletLog = await Society_Wallet_Payment.findOne({
-        where: { campaign_log_id: campaign_log_id }
-      });
-
-      if (!existingWalletLog) {
-          // 2. Prepare wallet log entry
-        await Society_Wallet_Payment.create({
-          society_id: society_id,
-          campaign_id:campaign_id,
-          campaign_log_id:campaign_log_id,
-          amount: commission, // the amount being added
-          // description: `Commission added for ${campaignLogs_Id.campaign_type.replace('_', ' ')}`,
-          description: `Commission added for ${campaignLogs_Id.campaign_type.replace('_', ' ')} - Fund Credited Campaign #${campaign.id_prifix_campaign} for ads #${campaign_log.id_prifix_campaign_ads}`,
-          wallet_type: 'credit', // or 'debit' depending on logic
-          total_amount: updatedAmount, // new balance after this transaction
-          balance: previousBalance, // balance before this transaction
-          payment_status: 'paid'
-        });
-
-          // Notify company
+          // Settlement is handled by admin manual transfer flow.
+          // Do not auto-credit society wallet on ad completion.
           await Notification.create({
             company_ids: [company_id],
             message: `Ad shared #${campaign.id_prifix_campaign} for ad #${campaign_log.id_prifix_campaign_ads} with company successfully.`,
@@ -1687,22 +1577,10 @@ in your dashboard</p>
             created_ip_address: req.ip
           });
 
-          // Notify society
-          await Notification.create({
-            society_ids: [society_id],
-            message: `Commission fund credited campaign #${campaign.id_prifix_campaign} for ad #${campaign_log.id_prifix_campaign_ads}`,
-            from: 'admin',
-            to: 'society',
-            notify_type: 'individual',
-            created_ip_address: req.ip
-          });
-        }
           await Advertisements.update(
               { share_status: 'yes' },
               { where: { id } } // make sure to use the correct advertisement ID
           );
-        }else {
-          console.log(`⚠️ Wallet log already exists for campaign_log_id: ${campaign_log_id}`);
         }
 
         
