@@ -296,51 +296,70 @@ exports.advertisementDataTable = async (req, res) => {
       }
 
 
-        const timezone = 'Asia/Kolkata';
         const currentIST = moment.tz('Asia/Kolkata').toDate();
-        if (campaign_status === 'live') {
-            const liveCampaignLogs = await Campaign_Log.findAll({
-                where: {
-                    status: { [Op.in]: ['active', 'inactive'] },
-                    ...(utype === 'Society_Admin' && { society_id: uid }),
-                    ...(utype === 'Society_User' && { society_id: req.user.society_id }),
-                    live_start_date: { [Op.lte]: currentIST },
-                    live_end_date: { [Op.gte]: currentIST }
-                },
-                attributes: ['id']
-            });
+        const liveWindowWhere = {
+            status: { [Op.in]: ['active', 'inactive'] },
+            ...(utype === 'Society_Admin' && { society_id: uid }),
+            ...(utype === 'Society_User' && { society_id: req.user.society_id }),
+            live_start_date: { [Op.lte]: currentIST },
+            live_end_date: { [Op.gte]: currentIST }
+        };
 
-            const liveCampaignLogIds = liveCampaignLogs.map(log => log.id);
-            whereClause.id = { [Op.in]: liveCampaignLogIds };
+        const liveCampaignLogs = await Campaign_Log.findAll({
+            where: liveWindowWhere,
+            attributes: ['id']
+        });
+        const liveCampaignLogIds = liveCampaignLogs.map((log) => log.id);
+
+        const endedLiveLogs = await Campaign_Log.findAll({
+            where: {
+                status: { [Op.in]: ['active', 'inactive'] },
+                ...(utype === 'Society_Admin' && { society_id: uid }),
+                ...(utype === 'Society_User' && { society_id: req.user.society_id }),
+                campaign_status: 'approved',
+                live_end_date: { [Op.lt]: currentIST }
+            },
+            attributes: ['id']
+        });
+        const completedByTimeLogIds = endedLiveLogs.map((log) => log.id);
+        const approvedExcludedIds = [...new Set([...liveCampaignLogIds, ...completedByTimeLogIds])];
+
+        if (campaign_status === 'live') {
+            whereClause.campaign_status = 'approved';
+            whereClause.id = liveCampaignLogIds.length
+                ? { [Op.in]: liveCampaignLogIds }
+                : -1;
           } else if (campaign_status === 'approved') {
               whereClause.campaign_status = 'approved';
               whereClause.society_approved_status = 'approved';
+              if (approvedExcludedIds.length) {
+                  whereClause.id = { [Op.notIn]: approvedExcludedIds };
+              }
           } else if (campaign_status === 'pending') {
               whereClause.campaign_status = 'pending';
               whereClause.admin_approved_status = 'approved';
           } else if (campaign_status === 'reject') {
               whereClause.campaign_status = 'reject';
           } else if (campaign_status === 'completed') {
-              whereClause.campaign_status = 'completed';
+              whereClause[Op.and] = [
+                  ...(whereClause[Op.and] || []),
+                  {
+                      [Op.or]: [
+                          { campaign_status: 'completed' },
+                          {
+                              campaign_status: 'approved',
+                              id: completedByTimeLogIds.length
+                                  ? { [Op.in]: completedByTimeLogIds }
+                                  : -1
+                          }
+                      ]
+                  }
+              ];
           }
-
-
-        const liveCampaignLogs = await Campaign_Log.findAll({
-            where: {
-                status: { [Op.in]: ['active', 'inactive'] },
-                ...(utype === 'Society_Admin' && { society_id: uid }),
-                ...(utype === 'Society_User' && { society_id: req.user.society_id }),
-                live_start_date: { [Op.lte]: currentIST },
-                live_end_date: { [Op.gte]: currentIST }
-            }
-        });
-
-
-        const liveCampaignIds = liveCampaignLogs.map(log => log.id);
 
         const liveCount = await Campaign_Log.count({
             where: {
-                id: { [Op.in]: liveCampaignIds },
+                id: liveCampaignLogIds.length ? { [Op.in]: liveCampaignLogIds } : -1,
                 campaign_status: 'approved',
                 status: { [Op.in]: ['active', 'inactive'] },
                 society_id: societyId,
@@ -353,6 +372,7 @@ exports.advertisementDataTable = async (req, res) => {
                 campaign_status: 'approved',
                 society_approved_status: 'approved',
                 society_id: societyId,
+                ...(approvedExcludedIds.length ? { id: { [Op.notIn]: approvedExcludedIds } } : {})
             }
         });
 
@@ -375,9 +395,17 @@ exports.advertisementDataTable = async (req, res) => {
 
         const completedCount = await Campaign_Log.count({
             where: {
-                // ...whereClause,
-                campaign_status: 'completed',
+                status: { [Op.in]: ['active', 'inactive'] },
                 society_id: societyId,
+                [Op.or]: [
+                    { campaign_status: 'completed' },
+                    {
+                        campaign_status: 'approved',
+                        id: completedByTimeLogIds.length
+                            ? { [Op.in]: completedByTimeLogIds }
+                            : -1
+                    }
+                ]
             }
         });
 
@@ -401,6 +429,8 @@ exports.advertisementDataTable = async (req, res) => {
                 'society_approved_status',
                 'slot_start_time',
                 'slot_end_time',
+                'live_start_date',
+                'live_end_date',
                 'createdAt',
                 'status',
                 [Sequelize.literal(`(
@@ -517,38 +547,104 @@ exports.campaignDataTableSocietyCampinwise = async (req, res) => {
     if (area_id) whereClause.campaign_area_id = area_id;
     if (company_id) whereClause.company_id = company_id;
 
+    const currentIST = moment.tz('Asia/Kolkata').toDate();
+    const liveStart = currentIST;
+    const liveEnd = currentIST;
+
     // Step 3: Apply campaign status logic
     if (campaign_status === 'live') {
-      const todayStart = moment.tz('Asia/Kolkata').startOf('day').toDate();
-      const todayEnd = moment.tz('Asia/Kolkata').endOf('day').toDate();
-
       const liveLogs = await Campaign_Log.findAll({
         where: {
-          live_start_date: { [Op.lte]: todayEnd },
-          live_end_date: { [Op.gte]: todayStart }
+          ...(society_id && { society_id }),
+          campaign_status: 'approved',
+          status: { [Op.in]: ['active', 'inactive'] },
+          live_start_date: { [Op.lte]: liveEnd },
+          live_end_date: { [Op.gte]: liveStart }
         }
       });
 
       const liveIds = liveLogs.map(log => log.campaign_id);
       whereClause.campaign_status = 'approved';
-      whereClause.id = { [Op.in]: liveIds };
+      whereClause.id = liveIds.length ? { [Op.in]: liveIds } : -1;
+    } else if (campaign_status === 'approved') {
+      const liveLogs = await Campaign_Log.findAll({
+        where: {
+          ...(society_id && { society_id }),
+          campaign_status: 'approved',
+          status: { [Op.in]: ['active', 'inactive'] },
+          live_start_date: { [Op.lte]: liveEnd },
+          live_end_date: { [Op.gte]: liveStart }
+        },
+        attributes: ['campaign_id'],
+        raw: true
+      });
+      const endedLogs = await Campaign_Log.findAll({
+        where: {
+          ...(society_id && { society_id }),
+          campaign_status: 'approved',
+          status: { [Op.in]: ['active', 'inactive'] },
+          live_end_date: { [Op.lt]: currentIST }
+        },
+        attributes: ['campaign_id'],
+        raw: true
+      });
+      const excludedCampaignIds = [
+        ...new Set([
+          ...liveLogs.map((log) => log.campaign_id),
+          ...endedLogs.map((log) => log.campaign_id)
+        ])
+      ];
+
+      whereClause.campaign_status = 'approved';
+      if (excludedCampaignIds.length) {
+        whereClause.id = { [Op.notIn]: excludedCampaignIds };
+      }
+    } else if (campaign_status === 'completed') {
+      const endedLogs = await Campaign_Log.findAll({
+        where: {
+          ...(society_id && { society_id }),
+          campaign_status: 'approved',
+          status: { [Op.in]: ['active', 'inactive'] },
+          live_end_date: { [Op.lt]: currentIST }
+        },
+        attributes: ['campaign_id'],
+        raw: true
+      });
+      const endedCampaignIds = [...new Set(endedLogs.map((log) => log.campaign_id))];
+
+      whereClause[Op.or] = [
+        { campaign_status: 'completed' },
+        ...(endedCampaignIds.length ? [{ id: { [Op.in]: endedCampaignIds } }] : [])
+      ];
     } else if (campaign_status) {
       whereClause.campaign_status = campaign_status;
     }
 
     // Step 4: Apply society_id campaign ID filtering (if not live)
     if (campaign_status !== 'live' && campaignIdFilter) {
-      whereClause.id = { [Op.in]: campaignIdFilter };
+      if (whereClause.id) {
+        whereClause[Op.and] = [
+          ...(whereClause[Op.and] || []),
+          { id: { [Op.in]: campaignIdFilter } }
+        ];
+      } else {
+        whereClause.id = { [Op.in]: campaignIdFilter };
+      }
     }
 
     // Step 5: Apply search filter
     if (search) {
-      whereClause[Op.or] = [
-        literal(`CAST("Campaign"."id" AS TEXT) ILIKE '%${search}%'`),
-        { campaign_type: { [Op.iLike]: `%${search}%` } },
-        { creative_type: { [Op.iLike]: `%${search}%` } },
-        { campaign_name: { [Op.iLike]: `%${search}%` } },
-        literal(`TO_CHAR("Campaign"."createdAt", 'YYYY-MM-DD') ILIKE '%${search}%'`)
+      whereClause[Op.and] = [
+        ...(whereClause[Op.and] || []),
+        {
+          [Op.or]: [
+            literal(`CAST("Campaign"."id" AS TEXT) ILIKE '%${search}%'`),
+            { campaign_type: { [Op.iLike]: `%${search}%` } },
+            { creative_type: { [Op.iLike]: `%${search}%` } },
+            { campaign_name: { [Op.iLike]: `%${search}%` } },
+            literal(`TO_CHAR("Campaign"."createdAt", 'YYYY-MM-DD') ILIKE '%${search}%'`)
+          ]
+        }
       ];
     }
 
@@ -565,14 +661,7 @@ exports.campaignDataTableSocietyCampinwise = async (req, res) => {
       societyCampaignIds = allLogs.map(log => log.campaign_id);
     }
 
-    // Step 8: Counts (excluding 'live' campaigns)
-    const approvedCount = await Campaign.count({
-      where: {
-        campaign_status: 'approved',
-        ...(societyCampaignIds.length && { id: { [Op.in]: societyCampaignIds } })
-      }
-    });
-
+    // Step 8: Counts
     const pendingCount = await Campaign.count({
       where: {
         campaign_status: 'pending',
@@ -587,29 +676,63 @@ exports.campaignDataTableSocietyCampinwise = async (req, res) => {
       }
     });
 
-    const completedCount = await Campaign.count({
-      where: {
-        campaign_status: 'completed',
-        ...(societyCampaignIds.length && { id: { [Op.in]: societyCampaignIds } })
-      }
-    });
-
     // Step 9: Live count (live campaigns)
-    const liveStart = moment.tz('Asia/Kolkata').startOf('day').toDate();
-    const liveEnd = moment.tz('Asia/Kolkata').endOf('day').toDate();
     const liveLogs = await Campaign_Log.findAll({
       where: {
+        ...(society_id && { society_id }),
+        campaign_status: 'approved',
+        status: { [Op.in]: ['active', 'inactive'] },
         live_start_date: { [Op.lte]: liveEnd },
         live_end_date: { [Op.gte]: liveStart }
       }
     });
-    const liveIds = liveLogs.map(log => log.campaign_id);
-    const liveCount = await Campaign.count({
+    const liveIds = [...new Set(liveLogs.map(log => log.campaign_id))];
+    const endedLogs = await Campaign_Log.findAll({
       where: {
+        ...(society_id && { society_id }),
         campaign_status: 'approved',
-        id: { [Op.in]: liveIds },
-        ...(societyCampaignIds.length && { id: { [Op.in]: societyCampaignIds } })
-      }
+        status: { [Op.in]: ['active', 'inactive'] },
+        live_end_date: { [Op.lt]: currentIST }
+      },
+      attributes: ['campaign_id'],
+      raw: true
+    });
+    const endedIds = [...new Set(endedLogs.map((log) => log.campaign_id))];
+    const approvedExcludedIds = [...new Set([...liveIds, ...endedIds])];
+
+    const approvedCountWhere = [{ campaign_status: 'approved' }];
+    if (societyCampaignIds.length) {
+      approvedCountWhere.push({ id: { [Op.in]: societyCampaignIds } });
+    }
+    if (approvedExcludedIds.length) {
+      approvedCountWhere.push({ id: { [Op.notIn]: approvedExcludedIds } });
+    }
+    const approvedCount = await Campaign.count({
+      where: { [Op.and]: approvedCountWhere }
+    });
+
+    const completedCountWhere = [{
+      [Op.or]: [
+        { campaign_status: 'completed' },
+        ...(endedIds.length ? [{ id: { [Op.in]: endedIds } }] : [])
+      ]
+    }];
+    if (societyCampaignIds.length) {
+      completedCountWhere.push({ id: { [Op.in]: societyCampaignIds } });
+    }
+    const completedCount = await Campaign.count({
+      where: { [Op.and]: completedCountWhere }
+    });
+
+    const liveCountWhere = [{
+      campaign_status: 'approved',
+      id: liveIds.length ? { [Op.in]: liveIds } : -1
+    }];
+    if (societyCampaignIds.length) {
+      liveCountWhere.push({ id: { [Op.in]: societyCampaignIds } });
+    }
+    const liveCount = await Campaign.count({
+      where: { [Op.and]: liveCountWhere }
     });
 
     // Step 10: Final paginated query
