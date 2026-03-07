@@ -505,11 +505,9 @@ exports.campaignDataTableAdmin = async (req, res) => {
       // Main where clause (includes dynamic filters like campaign_status and search)
       const whereClause = { ...baseWhereClause };
       const currentIST = moment.tz('Asia/Kolkata').toDate();
+      let liveCampaignIdsCurrent = [];
     // If 'live' status is selected
     if (campaign_status === 'live') {
-     
-      // const currentIST = moment.tz('Asia/Kolkata').toDate();
-
       const liveCampaignLogs = await Campaign_Log.findAll({
         where: {
           live_start_date: { [Op.lte]: currentIST },
@@ -518,11 +516,26 @@ exports.campaignDataTableAdmin = async (req, res) => {
       });
 
       // Get campaign_ids from live campaigns
-      const campaignIds = liveCampaignLogs.map(log => log.campaign_id);
+      const campaignIds = [...new Set(liveCampaignLogs.map(log => log.campaign_id).filter(Boolean))];
     
       // Modify whereClause to include only those campaigns that are approved and within live window
       whereClause.campaign_status = 'approved'; // Only 'approved' campaigns
       whereClause.id = { [Op.in]: campaignIds }; // Filter by campaign_id from Campaign_Log
+    } else if (campaign_status === 'approved') {
+        const liveCampaignLogs = await Campaign_Log.findAll({
+          where: {
+            live_start_date: { [Op.lte]: currentIST },
+            live_end_date: { [Op.gte]: currentIST }
+          },
+          attributes: ['campaign_id'],
+          raw: true
+        });
+        liveCampaignIdsCurrent = [...new Set(liveCampaignLogs.map(log => log.campaign_id).filter(Boolean))];
+
+        whereClause.campaign_status = 'approved';
+        if (liveCampaignIdsCurrent.length > 0) {
+          whereClause.id = { [Op.notIn]: liveCampaignIdsCurrent };
+        }
     } else if (campaign_status) {
         whereClause.campaign_status = campaign_status;
     }
@@ -591,8 +604,13 @@ exports.campaignDataTableAdmin = async (req, res) => {
        });
 
       // Counts based on base filters only (avoid search/campaign_status conflicts)
+      const approvedCountWhere = { ...baseWhereClause, campaign_status: 'approved' };
+      if (liveCampaignIdsForCount.length > 0) {
+          approvedCountWhere.id = { [Op.notIn]: [...new Set(liveCampaignIdsForCount.filter(Boolean))] };
+      }
+
       const approvedCount = await Campaign.count({
-          where: { ...baseWhereClause, campaign_status: 'approved' }
+          where: approvedCountWhere
       });
 
       const pendingCount = await Campaign.count({
