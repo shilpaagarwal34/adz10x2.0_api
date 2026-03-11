@@ -1675,12 +1675,21 @@ exports.sendLoginOtp = async (req, res) => {
         const expiresAt = Date.now() + LOGIN_OTP_TTL_MS;
         loginOtpStore.set(m, { otp, expiresAt });
 
+        const apiKey = process.env.AISENSY_API_KEY;
+        if (!apiKey || !apiKey.trim()) {
+            console.warn("[sendLoginOtp] AISENSY_API_KEY not set. OTP for mobile", m, "is", otp, "(use for testing only).");
+            return res.status(503).json({
+                status: 503,
+                message: "OTP service is not configured. Please use Email & Password to log in or contact support."
+            });
+        }
+
         let mobileForWa = m;
         if (!mobileForWa.startsWith('91')) mobileForWa = '91' + mobileForWa;
         try {
             const axios = require('axios');
             const whatsappData = JSON.stringify({
-                apiKey: process.env.AISENSY_API_KEY,
+                apiKey,
                 campaignName: "registration_otp",
                 destination: mobileForWa,
                 userName: "ADz10x.com",
@@ -1701,8 +1710,12 @@ exports.sendLoginOtp = async (req, res) => {
                 data: whatsappData
             });
         } catch (waErr) {
-            console.error("Failed to send WhatsApp login OTP:", waErr.message);
-            return res.status(500).json({ status: 500, message: "Failed to send OTP. Please try again." });
+            const msg = waErr.response?.data?.message || waErr.response?.data?.error || waErr.message;
+            console.error("Failed to send WhatsApp login OTP:", msg, "| For mobile", m, "OTP was", otp);
+            return res.status(500).json({
+                status: 500,
+                message: msg && msg.length < 120 ? `Failed to send OTP: ${msg}` : "Failed to send OTP. Please try again."
+            });
         }
         return res.status(200).json({ status: 200, message: "OTP sent successfully to your mobile." });
     } catch (error) {
