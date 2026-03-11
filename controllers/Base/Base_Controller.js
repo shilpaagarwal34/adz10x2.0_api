@@ -1615,6 +1615,200 @@ exports.resendOTP = async (req, res) => {
     }
 };
 
+// In-memory store for login OTP: mobile (10 digits) -> { otp, expiresAt }
+const loginOtpStore = new Map();
+const LOGIN_OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+const normalizeMobile = (mobile) => String(mobile || '').replace(/\D/g, '').slice(-10);
+
+const findUserByMobile = async (mobile) => {
+    const m = normalizeMobile(mobile);
+    if (m.length !== 10) return null;
+    let user = await Society_Registration.findOne({ where: { mobile_number: m, status: { [Op.ne]: 'delete' } } });
+    let userType = 'Society_Admin';
+    let profileKey = 'society_profile_img_path';
+    let modelType = Society_Registration;
+    if (!user) {
+        user = await Company_Registration.findOne({ where: { mobile_number: m, status: { [Op.ne]: 'delete' } } });
+        userType = 'Company_Admin';
+        profileKey = 'company_profile_photo_path';
+        modelType = Company_Registration;
+    }
+    if (!user) {
+        user = await Society_User.findOne({ where: { mobile_number: m, status: { [Op.ne]: 'delete' } } });
+        userType = 'Society_User';
+        profileKey = 'society_profile_img_path';
+        modelType = Society_User;
+    }
+    if (!user) {
+        user = await Company_User.findOne({ where: { mobile_number: m, status: { [Op.ne]: 'delete' } } });
+        userType = 'Company_User';
+        profileKey = 'company_profile_img_path';
+        modelType = Company_User;
+    }
+    if (!user) return null;
+    return { user, userType, profileKey, modelType };
+};
+
+exports.sendLoginOtp = async (req, res) => {
+    try {
+        const { mobile } = req.body;
+        const m = normalizeMobile(mobile);
+        if (m.length !== 10) {
+            return res.status(400).json({ status: 400, message: "Valid 10-digit mobile number is required." });
+        }
+        const found = await findUserByMobile(m);
+        if (!found) {
+            return res.status(400).json({ status: 400, message: "No account found with this mobile number." });
+        }
+        const { user } = found;
+        if (user.status === 'inactive') {
+            return res.status(403).json({ status: 403, message: "User is inactive. Please contact support." });
+        }
+        let otp;
+        let isOtpUnique = false;
+        while (!isOtpUnique) {
+            otp = Math.floor(100000 + Math.random() * 900000);
+            const existing = Array.from(loginOtpStore.entries()).find(([, v]) => v.otp === otp);
+            if (!existing) isOtpUnique = true;
+        }
+        const expiresAt = Date.now() + LOGIN_OTP_TTL_MS;
+        loginOtpStore.set(m, { otp, expiresAt });
+
+        let mobileForWa = m;
+        if (!mobileForWa.startsWith('91')) mobileForWa = '91' + mobileForWa;
+        try {
+            const axios = require('axios');
+            const whatsappData = JSON.stringify({
+                apiKey: process.env.AISENSY_API_KEY,
+                campaignName: "registration_otp",
+                destination: mobileForWa,
+                userName: "ADz10x.com",
+                templateParams: [otp.toString()],
+                source: "login-otp",
+                media: {},
+                buttons: [{ type: "button", sub_type: "url", index: 0, parameters: [{ type: "text", text: otp.toString() }] }],
+                carouselCards: [],
+                location: {},
+                attributes: {},
+                paramsFallbackValue: { FirstName: "user" }
+            });
+            await axios.request({
+                method: 'post',
+                maxBodyLength: Infinity,
+                url: 'https://backend.aisensy.com/campaign/t1/api/v2',
+                headers: { 'Content-Type': 'application/json' },
+                data: whatsappData
+            });
+        } catch (waErr) {
+            console.error("Failed to send WhatsApp login OTP:", waErr.message);
+            return res.status(500).json({ status: 500, message: "Failed to send OTP. Please try again." });
+        }
+        return res.status(200).json({ status: 200, message: "OTP sent successfully to your mobile." });
+    } catch (error) {
+        console.error("Error in sendLoginOtp:", error);
+        return res.status(500).json({ status: 500, message: "Internal Server Error", error: error.message });
+    }
+};
+
+exports.verifyLoginOtp = async (req, res) => {
+    try {
+        const { mobile, otp } = req.body;
+        const m = normalizeMobile(mobile);
+        const otpStr = String(otp || '').replace(/\D/g, '').trim();
+        if (m.length !== 10 || otpStr.length !== 6) {
+            return res.status(400).json({ status: 400, message: "Mobile number and 6-digit OTP are required." });
+        }
+        const stored = loginOtpStore.get(m);
+        if (!stored) {
+            return res.status(400).json({ status: 400, message: "OTP expired or invalid. Please request a new OTP." });
+        }
+        if (Date.now() > stored.expiresAt) {
+            loginOtpStore.delete(m);
+            return res.status(400).json({ status: 400, message: "OTP expired. Please request a new OTP." });
+        }
+        if (stored.otp !== parseInt(otpStr, 10)) {
+            return res.status(401).json({ status: 401, message: "Invalid OTP." });
+        }
+        loginOtpStore.delete(m);
+
+        const found = await findUserByMobile(m);
+        if (!found) {
+            return res.status(400).json({ status: 400, message: "Account not found." });
+        }
+        const { user, userType, profileKey } = found;
+
+        if (user.status === 'inactive') {
+            return res.status(403).json({ status: 403, message: "User is inactive. Please contact support." });
+        }
+        if (user.kyc_status === 'rejected') {
+            return res.status(403).json({ status: 403, message: "Your account is rejected.", is_logged_in: false });
+        }
+
+        let parentKycStatus = user.kyc_status || null;
+        if (userType === 'Company_User') {
+            const company = await Company_Registration.findOne({ where: { id: user.company_id } });
+            if (company) parentKycStatus = company.kyc_status;
+            if (!company || company.status !== 'active' || company.kyc_status === 'rejected') {
+                return res.status(403).json({ status: 403, message: "Company account is inactive or KYC rejected.", is_logged_in: false });
+            }
+        }
+        if (userType === 'Society_User') {
+            const society = await Society_Registration.findOne({ where: { id: user.society_id } });
+            if (society) parentKycStatus = society.kyc_status;
+            if (!society || society.status !== 'active' || society.kyc_status === 'rejected') {
+                return res.status(403).json({ status: 403, message: "Society account is inactive or KYC rejected.", is_logged_in: false });
+            }
+        }
+
+        const token = jwt.sign(
+            { email: user.email, id: user.id, userType },
+            process.env.JWT_SECRET,
+            { expiresIn: '7d' }
+        );
+        await user.update({ token });
+        if (['Society_User', 'Company_User', 'Company_Admin', 'Society_Admin'].includes(userType)) {
+            await user.update({ login_date_time: moment().utc().format('YYYY-MM-DD HH:mm:ss') });
+        }
+
+        let menu = { dashboard: true, profile: true, settings: true, logout: true };
+        if (userType === 'Company_Admin' || userType === 'Society_Admin') {
+            menu.advertisement = true;
+            menu.payments = true;
+            menu.users = true;
+            menu.report = true;
+            menu.wallet = true;
+            if (user.kyc_status !== 'approved') menu = { dashboard: true, profile: true, settings: true, logout: true };
+        }
+
+        return res.status(200).json({
+            status: 200,
+            message: "Login successful",
+            data: {
+                id: user.id,
+                name: user.name || user.user_name,
+                society_comany_name: user.society_name || user.company_name,
+                society_address: user.address || null,
+                email: user.email,
+                mobile_number: user.mobile_number,
+                user_type: userType,
+                privileges: user.privileges || [],
+                [profileKey]: user[profileKey],
+                is_otp_verified: "1",
+                is_show_first_screen: "1",
+                account_status: user.account_status || null,
+                kyc_status: parentKycStatus,
+                token: token,
+                menu: menu,
+                ...(userType === 'Society_User' && { role_name: user.role_name })
+            }
+        });
+    } catch (error) {
+        console.error("Error in verifyLoginOtp:", error);
+        return res.status(500).json({ status: 500, message: "Internal Server Error", error: error.message });
+    }
+};
+
 exports.relationManagerID = async (req, res) =>{
     try{
         const rel_manager = await Master_Admin.findAll({

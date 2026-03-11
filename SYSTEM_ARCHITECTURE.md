@@ -1,4 +1,4 @@
-# Adz10x — High-Level System Architecture
+1      `# Adz10x — High-Level System Architecture
 
 ## Overview
 

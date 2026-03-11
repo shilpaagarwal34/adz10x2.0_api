@@ -183,6 +183,8 @@ router.post('/forgot-password', baseController.forgotPassword);
 router.post('/change-password', baseController.changePassword);
 router.post("/verify-otp", baseController.verifyOTP);
 router.post("/resend-otp", baseController.resendOTP);
+router.post("/send-login-otp", baseController.sendLoginOtp);
+router.post("/verify-login-otp", baseController.verifyLoginOtp);
 
 router.get('/admin/rel-manager', authenticateUser, baseController.relationManagerID);
 router.get('/admin-all-campaign-days',baseController.getAllCampaignDays);
