@@ -94,7 +94,7 @@ exports.getVisualSetting = async (req, res) => {
         });
 
         if (!visual) {
-            return res.status(404).json({ status:404,  message: 'Visual setting not found' });
+            return res.status(200).json({ status: 200, message: 'No visual settings configured yet', data: null });
         }
 
         return res.status(200).json({ status: 200, message: 'Data fetched successfully', data: visual });
