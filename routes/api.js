@@ -131,7 +131,9 @@ router.get('/admin/company-payments-table', authenticateUser, PaymentsController
 router.get('/admin/company-wallets-table', authenticateUser,  PaymentsControllerAdmin.walletAdminDataTable);
 router.get('/admin/campaign-settlement-summary', authenticateUser, PaymentsControllerAdmin.campaignSettlementSummary);
 router.get('/admin/campaign-settlement-table', authenticateUser, PaymentsControllerAdmin.campaignSettlementDataTable);
-router.post('/admin/campaign-settlement-transfer', authenticateUser, PaymentsControllerAdmin.transferCampaignSettlement);
+router.post('/admin/campaign-settlement-transfer', upload.fields([
+    { name: 'transaction_path', maxCount:1 }
+]), authenticateUser, PaymentsControllerAdmin.transferCampaignSettlement);
 router.get('/admin/society/withdrawal-payments-table', authenticateUser,  PaymentsControllerAdmin.paymentsWithdrawalAdminDataTable);
 router.get('/admin/withdrawa-view/:id', authenticateUser, PaymentsControllerAdmin.paymentsWithdrawalByIdAdmin);
 router.post('/admin/society-add-withdrawal-update', upload.fields([

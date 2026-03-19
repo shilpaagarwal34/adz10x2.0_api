@@ -55,6 +55,14 @@ const Society_Wallet = sequelize.define('Wallet',{
           type: DataTypes.TEXT,
           allowNull:true
      },
+     transaction_path:{
+          type: DataTypes.TEXT,
+          allowNull:true
+     },
+     transaction_name:{
+          type: DataTypes.TEXT,
+          allowNull:true
+     },
      payment_status: {
           type: DataTypes.ENUM('approved', 'pending', 'reject','paid'),
           defaultValue: 'pending',

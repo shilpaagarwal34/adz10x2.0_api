@@ -852,7 +852,7 @@ exports.campaignSettlementDataTable = async (req, res) => {
                 campaign_log_id: { [Op.ne]: null },
                 status: { [Op.in]: ['active', 'inactive'] }
             },
-            attributes: ['campaign_log_id', 'amount', 'createdAt']
+            attributes: ['campaign_log_id', 'amount', 'createdAt', 'transaction_path', 'transaction_name']
         });
         const settlementByLog = new Map(
             allSettlementRows.map((row) => [row.campaign_log_id, row])
@@ -944,7 +944,9 @@ exports.campaignSettlementDataTable = async (req, res) => {
                 platform_amount: Number(Math.max(0, companyAmount - transferredAmount).toFixed(2)),
                 settlement_status: settlement ? 'paid' : 'pending',
                 completed_date: log.completed_date,
-                transferred_at: settlement?.createdAt || null
+                transferred_at: settlement?.createdAt || null,
+                transaction_path: settlement?.transaction_path || null,
+                transaction_name: settlement?.transaction_name || null
             };
         });
 
@@ -988,6 +990,9 @@ exports.transferCampaignSettlement = async (req, res) => {
     try {
         const userId = req.user?.id || null;
         const { campaign_log_id, transfer_amount, remark } = req.body;
+        const transactionFile = req?.files?.transaction_path?.[0];
+        const transactionPath = transactionFile ? `uploads/${transactionFile.filename}` : null;
+        const transactionName = transactionFile ? transactionFile.originalname : null;
 
         if (!campaign_log_id) {
             await transaction.rollback();
@@ -1103,6 +1108,8 @@ exports.transferCampaignSettlement = async (req, res) => {
             balance: previousBalance,
             payment_status: 'paid',
             transaction_id: `STL${Date.now()}`,
+            transaction_path: transactionPath,
+            transaction_name: transactionName,
             description: `Admin settlement transfer for campaign #${campaign?.id_prifix_campaign || campaignLog.campaign_id} ad #${campaignLog.id_prifix_campaign_ads}.${remark ? ` Remark: ${remark}` : ''}`,
             created_ip_address: req.ip,
             created_by: userId,
