@@ -506,6 +506,19 @@ exports.campaignDataTableAdmin = async (req, res) => {
       const whereClause = { ...baseWhereClause };
       const currentIST = moment.tz('Asia/Kolkata').toDate();
       let liveCampaignIdsCurrent = [];
+      let completedByTimeCampaignIdsCurrent = [];
+
+      const completedByTimeLogs = await Campaign_Log.findAll({
+        where: {
+          campaign_status: 'approved',
+          live_end_date: { [Op.lt]: currentIST }
+        },
+        attributes: ['campaign_id'],
+        raw: true
+      });
+      completedByTimeCampaignIdsCurrent = [
+        ...new Set(completedByTimeLogs.map((log) => log.campaign_id).filter(Boolean))
+      ];
     // If 'live' status is selected
     if (campaign_status === 'live') {
       const liveCampaignLogs = await Campaign_Log.findAll({
@@ -533,9 +546,22 @@ exports.campaignDataTableAdmin = async (req, res) => {
         liveCampaignIdsCurrent = [...new Set(liveCampaignLogs.map(log => log.campaign_id).filter(Boolean))];
 
         whereClause.campaign_status = 'approved';
-        if (liveCampaignIdsCurrent.length > 0) {
-          whereClause.id = { [Op.notIn]: liveCampaignIdsCurrent };
+        const approvedExcludedIds = [
+          ...new Set([
+            ...liveCampaignIdsCurrent,
+            ...completedByTimeCampaignIdsCurrent
+          ].filter(Boolean))
+        ];
+        if (approvedExcludedIds.length > 0) {
+          whereClause.id = { [Op.notIn]: approvedExcludedIds };
         }
+    } else if (campaign_status === 'completed') {
+        whereClause[Op.or] = [
+          { campaign_status: 'completed' },
+          ...(completedByTimeCampaignIdsCurrent.length
+            ? [{ campaign_status: 'approved', id: { [Op.in]: completedByTimeCampaignIdsCurrent } }]
+            : [])
+        ];
     } else if (campaign_status) {
         whereClause.campaign_status = campaign_status;
     }
@@ -605,8 +631,14 @@ exports.campaignDataTableAdmin = async (req, res) => {
 
       // Counts based on base filters only (avoid search/campaign_status conflicts)
       const approvedCountWhere = { ...baseWhereClause, campaign_status: 'approved' };
-      if (liveCampaignIdsForCount.length > 0) {
-          approvedCountWhere.id = { [Op.notIn]: [...new Set(liveCampaignIdsForCount.filter(Boolean))] };
+      const approvedExcludedIdsForCount = [
+        ...new Set([
+          ...liveCampaignIdsForCount,
+          ...completedByTimeCampaignIdsCurrent
+        ].filter(Boolean))
+      ];
+      if (approvedExcludedIdsForCount.length > 0) {
+          approvedCountWhere.id = { [Op.notIn]: approvedExcludedIdsForCount };
       }
 
       const approvedCount = await Campaign.count({
@@ -622,7 +654,15 @@ exports.campaignDataTableAdmin = async (req, res) => {
       });
 
       const completedCount = await Campaign.count({
-          where: { ...baseWhereClause, campaign_status: 'completed' }
+          where: {
+            ...baseWhereClause,
+            [Op.or]: [
+              { campaign_status: 'completed' },
+              ...(completedByTimeCampaignIdsCurrent.length
+                ? [{ campaign_status: 'approved', id: { [Op.in]: completedByTimeCampaignIdsCurrent } }]
+                : [])
+            ]
+          }
       });
 
       const campaign = await Campaign.findAll({
