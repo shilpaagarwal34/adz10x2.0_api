@@ -1103,7 +1103,7 @@ exports.transferCampaignSettlement = async (req, res) => {
             balance: previousBalance,
             payment_status: 'paid',
             transaction_id: `STL${Date.now()}`,
-            description: `Admin settlement transfer for campaign #${campaign?.id_prifix_campaign || campaignLog.campaign_id} ad #${campaignLog.id_prifix_campaign_ads}. Platform retained ₹${platformAmount.toFixed(2)}.${remark ? ` Remark: ${remark}` : ''}`,
+            description: `Admin settlement transfer for campaign #${campaign?.id_prifix_campaign || campaignLog.campaign_id} ad #${campaignLog.id_prifix_campaign_ads}.${remark ? ` Remark: ${remark}` : ''}`,
             created_ip_address: req.ip,
             created_by: userId,
             created_type: 'Admin'
