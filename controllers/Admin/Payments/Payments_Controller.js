@@ -695,7 +695,6 @@ const toNumber = (value) => {
 const buildSettlementWhereClause = (status) => {
     const whereClause = {
         status: { [Op.in]: ['active', 'inactive'] },
-        campaign_status: 'completed',
         admin_approved_status: 'approved',
         society_approved_status: 'approved',
         [Op.or]: [
@@ -716,8 +715,30 @@ exports.campaignSettlementSummary = async (req, res) => {
         const whereClause = buildSettlementWhereClause();
         delete whereClause.__settlement_status;
 
+        const currentIST = moment.tz('Asia/Kolkata').toDate();
+        const completedByTimeLogs = await Campaign_Log.findAll({
+            where: {
+                ...whereClause,
+                campaign_status: 'approved',
+                live_end_date: { [Op.lt]: currentIST }
+            },
+            attributes: ['id'],
+            raw: true
+        });
+        const completedByTimeLogIds = completedByTimeLogs.map((log) => log.id);
+
+        const eligibleWhereClause = {
+            ...whereClause,
+            [Op.or]: [
+                { campaign_status: 'completed' },
+                ...(completedByTimeLogIds.length
+                    ? [{ campaign_status: 'approved', id: { [Op.in]: completedByTimeLogIds } }]
+                    : [])
+            ]
+        };
+
         const campaignLogs = await Campaign_Log.findAll({
-            where: whereClause,
+            where: eligibleWhereClause,
             attributes: ['id', 'campaign_ads_amount', 'society_rate_snapshot']
         });
 
@@ -800,8 +821,30 @@ exports.campaignSettlementDataTable = async (req, res) => {
         const settlementStatus = whereClause.__settlement_status;
         delete whereClause.__settlement_status;
 
-        if (society_id) whereClause.society_id = Number(society_id);
-        if (company_id) whereClause.company_id = Number(company_id);
+        const currentIST = moment.tz('Asia/Kolkata').toDate();
+        const completedByTimeLogs = await Campaign_Log.findAll({
+            where: {
+                ...whereClause,
+                campaign_status: 'approved',
+                live_end_date: { [Op.lt]: currentIST }
+            },
+            attributes: ['id'],
+            raw: true
+        });
+        const completedByTimeLogIds = completedByTimeLogs.map((log) => log.id);
+
+        const eligibleWhereClause = {
+            ...whereClause,
+            [Op.or]: [
+                { campaign_status: 'completed' },
+                ...(completedByTimeLogIds.length
+                    ? [{ campaign_status: 'approved', id: { [Op.in]: completedByTimeLogIds } }]
+                    : [])
+            ]
+        };
+
+        if (society_id) eligibleWhereClause.society_id = Number(society_id);
+        if (company_id) eligibleWhereClause.company_id = Number(company_id);
 
         const allSettlementRows = await Society_Wallet_Payment.findAll({
             where: {
@@ -817,13 +860,13 @@ exports.campaignSettlementDataTable = async (req, res) => {
         const settledLogIds = allSettlementRows.map((row) => row.campaign_log_id);
 
         if (settlementStatus === 'paid') {
-            whereClause.id = settledLogIds.length ? { [Op.in]: settledLogIds } : -1;
+            eligibleWhereClause.id = settledLogIds.length ? { [Op.in]: settledLogIds } : -1;
         } else if (settlementStatus === 'pending') {
-            whereClause.id = settledLogIds.length ? { [Op.notIn]: settledLogIds } : { [Op.ne]: null };
+            eligibleWhereClause.id = settledLogIds.length ? { [Op.notIn]: settledLogIds } : { [Op.ne]: null };
         }
 
         const { count, rows } = await Campaign_Log.findAndCountAll({
-            where: whereClause,
+            where: eligibleWhereClause,
             attributes: [
                 'id',
                 'campaign_id',
@@ -955,12 +998,22 @@ exports.transferCampaignSettlement = async (req, res) => {
             where: {
                 id: campaign_log_id,
                 status: { [Op.in]: ['active', 'inactive'] },
-                campaign_status: 'completed',
                 admin_approved_status: 'approved',
                 society_approved_status: 'approved',
                 [Op.or]: [
-                    { refund_status: { [Op.ne]: 'refund' } },
-                    { refund_status: null }
+                    { campaign_status: 'completed' },
+                    {
+                        campaign_status: 'approved',
+                        live_end_date: { [Op.lt]: moment.tz('Asia/Kolkata').toDate() }
+                    }
+                ],
+                [Op.and]: [
+                    {
+                        [Op.or]: [
+                            { refund_status: { [Op.ne]: 'refund' } },
+                            { refund_status: null }
+                        ]
+                    }
                 ]
             },
             attributes: [
