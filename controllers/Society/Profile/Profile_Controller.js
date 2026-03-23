@@ -837,20 +837,57 @@ exports.societyRegistrationUpdateImage = async (req, res) => {
       return res.status(400).json({ status: 400, message: "Area Name is required" });
     }
 
-    // ✅ Parallel duplicate check
-    const [SocietyemailExists, SocietymobileExists, CompanyemailExists, CompanymobileExists] = await Promise.all([
-      Society_Registration.findOne({ where: { email: req.body.email, id: { [Op.ne]: societyId }, status: { [Op.ne]: 'delete' } } }),
-      Society_Registration.findOne({ where: { mobile_number: req.body.mobile_number, id: { [Op.ne]: societyId }, status: { [Op.ne]: 'delete' } } }),
-      Company_Registration.findOne({ where: { email: req.body.email, status: { [Op.ne]: 'delete' } } }),
-      Company_Registration.findOne({ where: { mobile_number: req.body.mobile_number, status: { [Op.ne]: 'delete' } } })
-    ]);
+    // ✅ Run duplicate checks only if user changed email/mobile.
+    // This allows profile edits for legacy accounts where duplicates already exist.
+    const requestedEmail = String(req.body.email || '').trim();
+    const requestedMobile = String(req.body.mobile_number || '').trim();
+    const currentEmail = String(check_edit.email || '').trim();
+    const currentMobile = String(check_edit.mobile_number || '').trim();
+    const emailChanged = requestedEmail && requestedEmail !== currentEmail;
+    const mobileChanged = requestedMobile && requestedMobile !== currentMobile;
 
-    if (SocietyemailExists || CompanyemailExists) {
-      return res.status(400).json({ status: 400, message: "Email already exists" });
+    if (emailChanged) {
+      const [SocietyemailExists, CompanyemailExists] = await Promise.all([
+        Society_Registration.findOne({
+          where: {
+            email: requestedEmail,
+            id: { [Op.ne]: societyId },
+            status: { [Op.ne]: 'delete' }
+          }
+        }),
+        Company_Registration.findOne({
+          where: {
+            email: requestedEmail,
+            status: { [Op.ne]: 'delete' }
+          }
+        })
+      ]);
+
+      if (SocietyemailExists || CompanyemailExists) {
+        return res.status(400).json({ status: 400, message: "Email already exists" });
+      }
     }
 
-    if (SocietymobileExists || CompanymobileExists) {
-      return res.status(400).json({ status: 400, message: "Mobile number already exists" });
+    if (mobileChanged) {
+      const [SocietymobileExists, CompanymobileExists] = await Promise.all([
+        Society_Registration.findOne({
+          where: {
+            mobile_number: requestedMobile,
+            id: { [Op.ne]: societyId },
+            status: { [Op.ne]: 'delete' }
+          }
+        }),
+        Company_Registration.findOne({
+          where: {
+            mobile_number: requestedMobile,
+            status: { [Op.ne]: 'delete' }
+          }
+        })
+      ]);
+
+      if (SocietymobileExists || CompanymobileExists) {
+        return res.status(400).json({ status: 400, message: "Mobile number already exists" });
+      }
     }
 
     // ✅ Safe number conversion helper
