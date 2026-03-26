@@ -74,8 +74,8 @@ const HOST = process.env.HOST || '0.0.0.0';
 const PORT = process.env.PORT || 3000;
 
 //  Sync database and start server
-sequelize.sync({ alter: true })
-// sequelize.sync()
+// sequelize.sync({ alter: true })
+sequelize.sync()
     .then(async () => {
         console.log(' Database connected and synced');
 
@@ -91,4 +91,19 @@ sequelize.sync({ alter: true })
     });
 
 //  Export for testing (optional)
+
+
+
+
+
+// process.on('uncaughtException', (err) => {
+//    console.error('UNCAUGHT EXCEPTION:', err);
+// });
+
+// process.on('unhandledRejection', (err) => {
+//    console.error('UNHANDLED REJECTION:', err);
+// });
+
+
+
 module.exports = app;

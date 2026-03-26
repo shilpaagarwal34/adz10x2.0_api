@@ -22,8 +22,13 @@ const path = require('path');
 const moment = require('moment');
 const { error } = require('console');
 
+
+
 exports.getSocietyProfile = async (req, res) => {
     try {
+
+           console.log("DEBUG → req.user.id:", req.user.id);
+           console.log("DEBUG → req.user_type:", req.user_type);
         // 👇 Start by detecting where the user is coming from
            let societyId = null;
            let societyUserId = null;
