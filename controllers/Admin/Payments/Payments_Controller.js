@@ -715,26 +715,9 @@ exports.campaignSettlementSummary = async (req, res) => {
         const whereClause = buildSettlementWhereClause();
         delete whereClause.__settlement_status;
 
-        const currentIST = moment.tz('Asia/Kolkata').toDate();
-        const completedByTimeLogs = await Campaign_Log.findAll({
-            where: {
-                ...whereClause,
-                campaign_status: 'approved',
-                live_end_date: { [Op.lt]: currentIST }
-            },
-            attributes: ['id'],
-            raw: true
-        });
-        const completedByTimeLogIds = completedByTimeLogs.map((log) => log.id);
-
         const eligibleWhereClause = {
             ...whereClause,
-            [Op.or]: [
-                { campaign_status: 'completed' },
-                ...(completedByTimeLogIds.length
-                    ? [{ campaign_status: 'approved', id: { [Op.in]: completedByTimeLogIds } }]
-                    : [])
-            ]
+            campaign_status: { [Op.in]: ['approved', 'completed'] }
         };
 
         const campaignLogs = await Campaign_Log.findAll({
@@ -821,26 +804,9 @@ exports.campaignSettlementDataTable = async (req, res) => {
         const settlementStatus = whereClause.__settlement_status;
         delete whereClause.__settlement_status;
 
-        const currentIST = moment.tz('Asia/Kolkata').toDate();
-        const completedByTimeLogs = await Campaign_Log.findAll({
-            where: {
-                ...whereClause,
-                campaign_status: 'approved',
-                live_end_date: { [Op.lt]: currentIST }
-            },
-            attributes: ['id'],
-            raw: true
-        });
-        const completedByTimeLogIds = completedByTimeLogs.map((log) => log.id);
-
         const eligibleWhereClause = {
             ...whereClause,
-            [Op.or]: [
-                { campaign_status: 'completed' },
-                ...(completedByTimeLogIds.length
-                    ? [{ campaign_status: 'approved', id: { [Op.in]: completedByTimeLogIds } }]
-                    : [])
-            ]
+            campaign_status: { [Op.in]: ['approved', 'completed'] }
         };
 
         if (society_id) eligibleWhereClause.society_id = Number(society_id);
@@ -1005,13 +971,7 @@ exports.transferCampaignSettlement = async (req, res) => {
                 status: { [Op.in]: ['active', 'inactive'] },
                 admin_approved_status: 'approved',
                 society_approved_status: 'approved',
-                [Op.or]: [
-                    { campaign_status: 'completed' },
-                    {
-                        campaign_status: 'approved',
-                        live_end_date: { [Op.lt]: moment.tz('Asia/Kolkata').toDate() }
-                    }
-                ],
+                campaign_status: { [Op.in]: ['approved', 'completed'] },
                 [Op.and]: [
                     {
                         [Op.or]: [
@@ -1035,7 +995,7 @@ exports.transferCampaignSettlement = async (req, res) => {
 
         if (!campaignLog) {
             await transaction.rollback();
-            return res.status(404).json({ status: 404, message: 'Eligible completed campaign log not found' });
+            return res.status(404).json({ status: 404, message: 'Eligible approved campaign log not found' });
         }
 
         const existingSettlement = await Society_Wallet_Payment.findOne({
