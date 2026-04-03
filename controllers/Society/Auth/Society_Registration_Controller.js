@@ -256,68 +256,6 @@ AWS.config.update({
         const baseUrl = process.env.BASE_URL;
         const logoUrl = `${baseUrl}/assets/adz10x-logo.png`;
 
-           // --- Send Welcome Email (Try-Catch Block only for email) ---
-        try {
-                const baseUrl = process.env.BASE_URL;
-                const logoUrl = `${baseUrl}/assets/adz10x-logo.png`;
-
-            const welcomeSubject = 'Welcome to ADZ10X – Start Earning from Your Community!';
-
-                              // Extract the part before '@' from the email
-            const emailPrefix = newSociety.email.split('@')[0];
-
-            // Get the last 4 digits of the mobile number
-            const mobileSuffix = newSociety.mobile_number.slice(-4);
-
-            // Form the password
-            const password = `${emailPrefix}@${mobileSuffix}`;
-
-            const welcomeBody =`<p>Dear ${society_name},</p>
-                   <p>Thank you for signing up with ADZ10X!</p>
-                   <p>Your account credentials as follows</p>
-                   <p>User Name : ${email}</p>
-                   <p>Password : ${password}</p>
-                   <p>To activate your dashboard and begin earning from campaigns, please complete the KYC procedure.</p>
-                   <p>For any assistance, write to <a href="mailto:support@adz10x.com">support@adz10x.com</a> or connect with your assigned Relationship Manager.</p>
-                   <p>Let’s unlock new income opportunities for your society!</p>`;
-
-            const emailParams = {
-                Source: process.env.AWS_SES_EMAIL,
-                Destination: {
-                    ToAddresses: [email]
-                },
-                Message: {
-                    Subject: {
-                        Data: welcomeSubject
-                    },
-                    Body: {
-                        Html: {
-                            Data: `
-                            <div style="max-width:600px; margin:0 auto; font-family:sans-serif; background:#f2f2f2; padding:20px;">
-                                <div style="background:#cce0ff; padding:20px; text-align:center;">
-                                    <img src="${logoUrl}" alt="ADZ10X Logo" style="height:60px;">
-                                </div>
-                                <div style="background:#fff; padding:30px; text-align:left;">
-                                    ${welcomeBody}
-                                </div>
-                                <div style="background:#cce0ff; padding:20px; text-align:center;">
-                                    <a href="https://www.adz10x.com" style="color:#0000ee; text-decoration:none;">www.adz10x.com</a>
-                                </div>
-                            </div>
-                            `
-                        }
-                    }
-                }
-            };
-
-            // await ses.sendEmail(emailParams).promise();
-             const response = await ses.sendEmail(emailParams).promise();
-            console.log("Welcome dashboard Email sent successfully:", response);
-        } catch (mailErr) {
-            console.log("Email sending failed:", mailErr.message);
-            // Optionally log or alert this failure, but don't block the main success response
-        }
-
 
         const emailParams = {
             Source: process.env.AWS_SES_EMAIL,
@@ -351,18 +289,25 @@ AWS.config.update({
             }
         };
         
-        // working code without whatsapp start
         let otpEmailSent = true;
         let otpEmailError = null;
         try {
             const response = await ses.sendEmail(emailParams).promise();
-            console.log("Email sent successfully:", response);
+            console.log("OTP email sent successfully:", response);
         } catch (emailError) {
             otpEmailSent = false;
             otpEmailError = emailError.message;
-            console.error("Failed to send email:", emailError.message);
+            console.error("Failed to send OTP email:", emailError.message);
         }
-        // working code without whatsapp end
+
+        if (!otpEmailSent) {
+            return res.status(500).json({
+                status: 500,
+                message: "Registration failed: Unable to send OTP email. Please try again.",
+                otp_email_sent: false,
+                otp_email_error: otpEmailError
+            });
+        }
 
                 // --- WhatsApp sending in its own try/catch ---
         try {
@@ -431,9 +376,7 @@ AWS.config.update({
 
         return res.status(201).json({
             status: 201,
-            message: otpEmailSent
-                ? "Society registered successfully. Please check your email for login details."
-                : "Society registered, but OTP email delivery is delayed. Please continue with OTP verification and use resend OTP.",
+            message: "Society registered successfully. Please verify OTP sent to your email/WhatsApp. Login details will be emailed after OTP verification.",
             data: {
                 token,
                 // otp:"",

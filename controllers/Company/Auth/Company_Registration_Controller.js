@@ -180,68 +180,6 @@ exports.companyRegistration = async (req, res) => {
              const baseUrl = process.env.BASE_URL;
         const logoUrl = `${baseUrl}/assets/adz10x-logo.png`;
 
-           // --- Send Welcome Email (Try-Catch Block only for email) ---
-        try {
-                const baseUrl = process.env.BASE_URL;
-                const logoUrl = `${baseUrl}/assets/adz10x-logo.png`;
-
-            const welcomeSubject = 'Welcome to ADZ10X – Start Earning from Your Community!';
-
-                              // Extract the part before '@' from the email
-            const emailPrefix = newCompany.email.split('@')[0];
-
-            // Get the last 4 digits of the mobile number
-            const mobileSuffix = newCompany.mobile_number.slice(-4);
-
-            // Form the password
-            const password = `${emailPrefix}@${mobileSuffix}`;
-
-            const welcomeBody =`<p>Dear ${newCompany.company_name},</p>
-                   <p>Your account credentials as follows</p>
-                   <p>User Name : ${newCompany.email}</p>
-                   <p>Password : ${password}</p>
-                   <p>Welcome to ADZ10X! Your journey to reaching verified communities begins here.</p>
-                   <p>To activate your dashboard and start creating campaigns, please complete the KYC procedure.</p>
-                   <p>Need help? Reach out to <a href="mailto:support@adz10x.com">support@adz10x.com</a> or connect with your Relationship Manager.</p>
-                   <p>Let’s grow your brand, one community at a time!</p>`;
-
-            const emailParams = {
-                Source: process.env.AWS_SES_EMAIL,
-                Destination: {
-                    ToAddresses: [email]
-                },
-                Message: {
-                    Subject: {
-                        Data: welcomeSubject
-                    },
-                    Body: {
-                        Html: {
-                            Data: `
-                            <div style="max-width:600px; margin:0 auto; font-family:sans-serif; background:#f2f2f2; padding:20px;">
-                                <div style="background:#cce0ff; padding:20px; text-align:center;">
-                                    <img src="${logoUrl}" alt="ADZ10X Logo" style="height:60px;">
-                                </div>
-                                <div style="background:#fff; padding:30px; text-align:left;">
-                                    ${welcomeBody}
-                                </div>
-                                <div style="background:#cce0ff; padding:20px; text-align:center;">
-                                    <a href="https://www.adz10x.com" style="color:#0000ee; text-decoration:none;">www.adz10x.com</a>
-                                </div>
-                            </div>
-                            `
-                        }
-                    }
-                }
-            };
-
-            // await ses.sendEmail(emailParams).promise();
-             const response = await ses.sendEmail(emailParams).promise();
-            console.log("Welcome dashboard Email sent successfully:", response);
-        } catch (mailErr) {
-            console.log("Email sending failed:", mailErr.message);
-            // Optionally log or alert this failure, but don't block the main success response
-        }
-
           const emailParams = {
             Source: process.env.AWS_SES_EMAIL,
             Destination: {
@@ -277,7 +215,7 @@ exports.companyRegistration = async (req, res) => {
         // await ses.sendEmail(emailParams).promise();
                 try {
                     const response = await ses.sendEmail(emailParams).promise();
-                    console.log("Email sent successfully:", response);
+                    console.log("OTP email sent successfully:", response);
                 } catch (emailError) {
                     console.error("Failed to send email:", emailError.message);
                     // // Rollback: Delete newly created company and profile
@@ -286,7 +224,7 @@ exports.companyRegistration = async (req, res) => {
         
                     return res.status(500).json({
                         status: 500,
-                        message: "Registration failed: Unable to send verification email.",
+                        message: "Registration failed: Unable to send OTP email. Please try again.",
                         error: emailError.message
                     });
                 }
@@ -358,7 +296,7 @@ exports.companyRegistration = async (req, res) => {
 
         return res.status(201).json({
             status: 201,
-            message: "Company registered successfully. Please check your email for login details.",
+            message: "Company registered successfully. Please verify OTP sent to your email/WhatsApp. Login details will be emailed after OTP verification.",
             data: {
                 token,
                 notification,
