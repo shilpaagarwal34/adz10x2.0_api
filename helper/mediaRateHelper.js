@@ -1,5 +1,5 @@
 const DEFAULT_PLATFORM_COMMISSION_PCT = 25;
-const WHATSAPP_PLATFORM_COMMISSION_PCT = 100;
+const WHATSAPP_PLATFORM_COMMISSION_PCT = 25; // Align WhatsApp commission with global default
 
 const MEDIA_TYPES = [
   "lift_branding_panels",
