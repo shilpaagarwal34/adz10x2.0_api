@@ -49,7 +49,7 @@ exports.getCompanyProfile = async (req, res) => {
          // Fetch company profile using company_id
          const company_profile = await Company_Profile.findOne({ where: { company_id: companyId } });
 
-          if(userType = 'Company_User')
+         if(userType === 'Company_User')
                 {
                     user = await Company_Registration.findOne({ where: { id: companyId } });
                 }
@@ -69,60 +69,24 @@ exports.getCompanyProfile = async (req, res) => {
             }
         }
 
-        let completion = 0;
-
-        // 1. Basic Society Details (20%)
-const basicDetails = [
-   user.company_name?.trim(),
-   user.email?.trim(),
-   user.company_brand_name?.trim(),
-   user.sector?.trim(),
-   user.company_profile_photo_path?.trim(),
-   user.mobile_number?.trim(),
-   company_profile.website?.trim()
-];
-const filledBasic = basicDetails.filter(field => field !== null && field !== undefined && field !== '').length;
-completion += (filledBasic / basicDetails.length) * 20;
-
-// 2. Contact Information (20%)
-const contactInfo = [
-   user.name?.trim(),
-   company_profile.company_mobile_number?.trim(),
-   company_profile.company_email_id?.trim()
-];
-const filledContact = contactInfo.filter(field => field !== null && field !== undefined && field !== '').length;
-completion += (filledContact / contactInfo.length) * 20;
-
-// 3. Society Location (20%)
-const location = [
-   user.city_id,
-   user.area_id,
-   user.pincode,
-   user.address_line_1?.trim()
-//    user.address_line_2?.trim()
-];
-const filledLocation = location.filter(field => field !== null && field !== undefined && field !== '').length;
-completion += (filledLocation / location.length) * 20;
-
-// 4. Billing Details (20%)
-const billing = [
-    company_profile.party_name?.trim(),
-    company_profile.gst_number?.trim(),
-    company_profile.billing_address_line_1?.trim()
-];
-const filledBilling = billing.filter(field => field !== null && field !== undefined && field !== '').length;
-completion += (filledBilling / billing.length) * 20;
-
-// 5. Advertisement Settings (20%)
-const card = [
-   company_profile.pan_card_path,
-   company_profile.gst_certificate_path,
-   company_profile.other_document_path
-];
-const filledAds = card.filter(field => field !== null && field !== undefined && field !== '').length;
-completion += (filledAds / card.length) * 20;
-
-const profileCompletion = Math.round(completion);
+        // Profile completion should track only REQUIRED fields from company profile form.
+        const requiredFields = [
+            user.company_name?.trim(),
+            user.company_brand_name?.trim(),
+            user.sector?.toString()?.trim(),
+            user.name?.trim(),
+            user.mobile_number?.toString()?.trim(),
+            user.email?.trim(),
+            user.city_id,
+            user.area_id,
+            user.pincode?.toString()?.trim(),
+            user.address_line_1?.trim(),
+            company_profile.pan_card_path?.trim(),
+        ];
+        const filledRequired = requiredFields.filter(
+            (field) => field !== null && field !== undefined && field !== ""
+        ).length;
+        const profileCompletion = Math.round((filledRequired / requiredFields.length) * 100);
  
          return res.status(200).json({
              status: 200,
