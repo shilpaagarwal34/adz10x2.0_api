@@ -898,8 +898,6 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 exports.getSocietiesWithinRadius = async (req, res) => {
     try {
         const {
-            city_id,
-            area_id,
             campaign_city_id,
             campaign_area_id,
             my_ads_location_latitude,
@@ -908,13 +906,9 @@ exports.getSocietiesWithinRadius = async (req, res) => {
             campaignDate: campaign_date,   // rename here
             day,
             radius_km,
-            media_type,
-            apply_strict_filters
+            media_type
         } = req.body;
         const platformRules = await fetchEffectivePlatformRules();
-        const resolvedCityId = campaign_city_id || city_id || null;
-        const resolvedAreaId = campaign_area_id || area_id || null;
-        const strictFiltersEnabled = apply_strict_filters === true || apply_strict_filters === "true";
 
      
         let campaigns = [];
@@ -952,49 +946,28 @@ exports.getSocietiesWithinRadius = async (req, res) => {
             });
         }
 
-        // 2. Filter societies by selected geography first (city/area)
-        const whereCondition = { status: "active" };
-        if (resolvedCityId) whereCondition.city_id = resolvedCityId;
-        if (resolvedAreaId) whereCondition.area_id = resolvedAreaId;
-
-        // Optional strict filter (kept disabled by default to avoid over-filtering campaign dropdown)
-        if (strictFiltersEnabled) {
-            whereCondition[Op.or] = [{ account_status: "approved" }, { kyc_status: "approved" }];
-        }
+        // 2. Filter societies (kyc_status = approved is set by admin; account_status kept in sync on approve)
+        const whereCondition = { 
+            status: "active",
+            [Op.or]: [
+                { account_status: "approved" },
+                { kyc_status: "approved" }
+            ]
+        };
+        if (campaign_city_id) whereCondition.city_id = campaign_city_id;
+        if (campaign_area_id) whereCondition.area_id = campaign_area_id;
 
         const societies = await Society_Registration.findAll({
             where: whereCondition,
             // attributes: ['id', 'longitude', 'latitude', 'city_id', 'area_id']
         });
 
-        console.log("[get-societies-within-radius] Request filters", {
-            city_id: resolvedCityId,
-            area_id: resolvedAreaId,
-            raw_city_id: city_id,
-            raw_area_id: area_id,
-            raw_campaign_city_id: campaign_city_id,
-            raw_campaign_area_id: campaign_area_id,
-            campaign_date: campaign_date || null,
-            media_type: media_type || null,
-            radius_km: radius_km || null,
-            strict_filters_enabled: strictFiltersEnabled,
-        });
-        console.log("[get-societies-within-radius] Societies matched base query", {
-            total: societies.length,
-        });
-
         const applyRadiusFilter = my_ads_location_latitude && my_ads_location_longitude && radius_km;
         const societiesWithinRadius = [];
-        let skippedByRadiusCount = 0;
-        let missingLatLongCount = 0;
-        let mediaNotOfferedCount = 0;
 
         for (const society of societies) {
             if (applyRadiusFilter) {
-                if (!society.latitude || !society.longitude) {
-                    missingLatLongCount += 1;
-                    continue;
-                }
+                if (!society.latitude || !society.longitude) continue;
 
                 const distance = calculateDistance(
                     parseFloat(my_ads_location_latitude),
@@ -1003,10 +976,7 @@ exports.getSocietiesWithinRadius = async (req, res) => {
                     parseFloat(society.longitude)
                 );
 
-                if (distance > parseFloat(radius_km)) {
-                    skippedByRadiusCount += 1;
-                    continue;
-                }
+                if (distance > parseFloat(radius_km)) continue;
             }
 
             const profile = await Society_Profile.findOne({
@@ -1022,14 +992,12 @@ exports.getSocietiesWithinRadius = async (req, res) => {
                 });
             }
 
-            const allowedValue = Number(profile?.ads_per_day);
-            const hasValidDailyLimit = Number.isFinite(allowedValue) && allowedValue > 0;
-            const allowed = hasValidDailyLimit ? allowedValue : null;
-            const disable = hasValidDailyLimit ? used >= allowed : false;
+            const allowed = profile?.ads_per_day ?? 0;
+            const disable = used >= allowed;
             const disableReasons = [];
             const disableReasonCodes = [];
 
-            if (disable && hasValidDailyLimit) {
+            if (disable) {
                 disableReasons.push(`Ad limit (${allowed}) reached for this society on ${campaign_date}`);
                 disableReasonCodes.push("ad_limit_reached");
             }
@@ -1048,23 +1016,19 @@ exports.getSocietiesWithinRadius = async (req, res) => {
                 const displayRateCard =
                     availabilityResult?.display_card || activeRateCard || null;
 
-                // Keep society visible even when selected platform/date is unavailable.
+                // If society does not offer the selected platform at all, hide it from company list.
                 if (!activeRateCard && availabilityResult?.reason_code === "platform_not_offered") {
-                    mediaNotOfferedCount += 1;
+                    continue;
                 }
 
                 if (displayRateCard) {
-                    const recomputed = calculateRateBreakup(
-                        Number(displayRateCard.society_rate) || 0,
-                        normalizeMediaType(displayRateCard.media_type)
-                    );
                     media_rate = {
                         id: displayRateCard.id,
                         media_type: displayRateCard.media_type,
-                        society_rate: recomputed.society_rate,
-                        platform_commission_pct: recomputed.platform_commission_pct,
-                        platform_rate: recomputed.platform_rate,
-                        company_rate: recomputed.company_rate,
+                        society_rate: Number(displayRateCard.society_rate) || 0,
+                        platform_commission_pct: Number(displayRateCard.platform_commission_pct) || 0,
+                        platform_rate: Number(displayRateCard.platform_rate) || 0,
+                        company_rate: Number(displayRateCard.company_rate) || 0,
                         effective_from: displayRateCard.effective_from,
                         effective_to: displayRateCard.effective_to,
                         availability_days: Array.isArray(displayRateCard.availability_days)
@@ -1110,16 +1074,6 @@ exports.getSocietiesWithinRadius = async (req, res) => {
             }
 
             societiesWithinRadius.push({
-                id: society.id,
-                society_id: society.id,
-                society_name: society.society_name || null,
-                name: society.name || null,
-                address: society.address || null,
-                city_id: society.city_id || null,
-                area_id: society.area_id || null,
-                latitude: society.latitude || null,
-                longitude: society.longitude || null,
-                label: society.society_name || society.name || `Society ${society.id}`,
                 society,
                 profile,
                 used,
@@ -1136,20 +1090,16 @@ exports.getSocietiesWithinRadius = async (req, res) => {
             });
         }
 
-        console.log("[get-societies-within-radius] Post-filter summary", {
-            returned: societiesWithinRadius.length,
-            apply_radius_filter: !!applyRadiusFilter,
-            skipped_by_radius: skippedByRadiusCount,
-            missing_lat_long: missingLatLongCount,
-            media_not_offered: mediaNotOfferedCount,
-        });
+        if (societiesWithinRadius.length === 0) {
+            return res.status(404).json({ status: 404, message: "No societies found" });
+        }
 
         res.status(200).json({
             status: 200,
             message: "Societies fetched successfully",
             total: societiesWithinRadius.length,
-            city_id: resolvedCityId,
-            area_id: resolvedAreaId,
+            city_id: campaign_city_id || null,
+            area_id: campaign_area_id || null,
             media_platforms: Object.values(platformRules),
             selected_media_constraints: media_type ? platformRules[normalizeMediaType(media_type)] || null : null,
             // campaigns: campaignsWithLogs,
@@ -1246,7 +1196,12 @@ exports.createOrUpdateCampaign = async (req, res) => {
             for (const societyId of selectedSocietyIds) {
                 const activeRateCard = await getActiveRateCardForDate(societyId, normalizedMediaType, campaign_date);
                 const breakup = activeRateCard
-                    ? calculateRateBreakup(Number(activeRateCard.society_rate) || 0, normalizedMediaType)
+                    ? {
+                        society_rate: Number(activeRateCard.society_rate) || 0,
+                        platform_commission_pct: Number(activeRateCard.platform_commission_pct) || 0,
+                        platform_rate: Number(activeRateCard.platform_rate) || 0,
+                        company_rate: Number(activeRateCard.company_rate) || 0,
+                    }
                     : calculateRateBreakup(0, normalizedMediaType);
 
                 pricingBySociety[societyId] = breakup;
