@@ -348,7 +348,6 @@ router.post('/create-company-campaign',
     upload.any(), // Accepts all fields, including dynamic ones
     authenticateCompanyUser,CampaignController.createOrUpdateCampaign
   );
-router.post('/company/campaign/initiate-payment', authenticateCompanyUser, CampaignController.initiateCampaignPayment);
 
 router.get('/company/campaign/view/:id', authenticateCompanyUser, CampaignController.viewCampaign);
 router.get('/company/ads-view/:id',authenticateCompanyUser, CampaignController.viewAdvertisement);
