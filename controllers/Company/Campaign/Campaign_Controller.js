@@ -33,6 +33,15 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 
+const MEDIA_TYPE_LABELS = {
+  lift_branding_panels: "In-Lift Advertising",
+  notice_board_sponsorship: "Notice Board Advertising",
+  gate_entry_exit_branding: "Main Gate Branding",
+  society_kiosk: "Kiosk",
+  whatsapp_promotional_day: "WhatsApp Group Promotion",
+  event_sponsorship: "Society Event Sponsorship",
+};
+
 const resolveRequestedSocietyIds = (body = {}) => {
   const ids = new Set();
   const rawArrays = [
@@ -217,12 +226,16 @@ const getPlatformRulesFromConfig = (campaignConfig = null) => {
 };
 
 const fetchEffectivePlatformRules = async () => {
-  const campaignConfig = await Campaign_Configuration.findOne({
-    attributes: ["platform_rules"],
-    where: { status: "active" },
-    order: [["createdAt", "ASC"]],
-  });
-  return getPlatformRulesFromConfig(campaignConfig);
+  try {
+    const campaignConfig = await Campaign_Configuration.findOne({
+      where: { status: "active" },
+      order: [["createdAt", "ASC"]],
+    });
+    return getPlatformRulesFromConfig(campaignConfig);
+  } catch {
+    // If campaign_configuration table/columns are missing, return defaults
+    return getPlatformRulesFromConfig(null);
+  }
 };
 
 const findConflictingBookings = async ({
@@ -1417,33 +1430,62 @@ exports.getSocietiesWithinRadius = async (req, res) => {
         }
       }
 
-      // All media platforms this society offers (respecting selected campaign date availability)
+      // All media platforms this society offers with their rates (for per-asset selection)
       let offered_media_types = [];
+      let media_assets = [];
       if (campaign_date) {
         const availableChecks = await Promise.all(
-          MEDIA_TYPES.map(async (type) => ({
-            media_type: type,
-            card: await getActiveRateCardForDate(
-              society.id,
-              type,
-              campaign_date,
-            ),
-          })),
+          MEDIA_TYPES.map(async (type) => {
+            const card = await getActiveRateCardForDate(society.id, type, campaign_date);
+            return { media_type: type, card };
+          }),
         );
         offered_media_types = availableChecks
           .filter((item) => item.card)
           .map((item) => item.media_type);
+
+        media_assets = availableChecks
+          .filter((item) => item.card)
+          .map((item) => {
+            const breakup = calculateRateBreakup(
+              Number(item.card.society_rate) || 0,
+              normalizeMediaType(item.card.media_type),
+            );
+            return {
+              key: item.media_type,
+              label: MEDIA_TYPE_LABELS[item.media_type] || item.media_type,
+              permission_cost: breakup.company_rate,
+              society_rate: breakup.society_rate,
+              platform_rate: breakup.platform_rate,
+              rate_card_id: item.card.id,
+            };
+          });
       } else {
         const offeredCards = await Society_Media_Rate_Card.findAll({
           where: { society_id: society.id, status: "active" },
-          attributes: ["media_type"],
           raw: true,
         });
-        offered_media_types = [
+        const uniqueTypes = [
           ...new Set(
             (offeredCards || []).map((c) => c.media_type).filter(Boolean),
           ),
         ];
+        offered_media_types = uniqueTypes;
+        media_assets = uniqueTypes.map((type) => {
+          const card = offeredCards.find((c) => c.media_type === type);
+          const breakup = calculateRateBreakup(
+            Number(card?.society_rate) || 0,
+            normalizeMediaType(type),
+          );
+          return {
+            key: type,
+            label: MEDIA_TYPE_LABELS[type] || type,
+            permission_cost: breakup.company_rate,
+            society_rate: breakup.society_rate,
+            platform_rate: breakup.platform_rate,
+            rate_card_id: card?.id || null,
+          };
+        });
       }
 
       societiesWithinRadius.push({
@@ -1470,6 +1512,7 @@ exports.getSocietiesWithinRadius = async (req, res) => {
           : availabilityPreview,
         media_rate,
         offered_media_types,
+        media_assets,
       });
     }
 
@@ -1510,10 +1553,6 @@ exports.createOrUpdateCampaign = async (req, res) => {
   try {
     const {
       id,
-      campaign_type,
-      creative_type,
-      lead_generation_url,
-      survey_url,
       campaign_name,
       campaign_date,
       campaign_city_id,
@@ -1523,13 +1562,8 @@ exports.createOrUpdateCampaign = async (req, res) => {
       my_ads_location_longitude,
       radius_km,
       search_by_google_location,
-      brand_promotions_creative,
       campaign_amount,
-      creative_text,
-      campaign_ads_amount,
       campaign_status,
-      societies_text,
-      media_type,
     } = req.body;
 
     const { userType, comapnyId, comapnyUserId } =
@@ -1544,83 +1578,69 @@ exports.createOrUpdateCampaign = async (req, res) => {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } =
       req.body;
 
-    const normalizedMediaType = normalizeMediaType(media_type);
-    if (normalizedMediaType && !isValidMediaType(normalizedMediaType)) {
-      return res.status(400).json({
-        status: 400,
-        message: "Invalid media_type selected",
-      });
+    // Validate campaign_date
+    if (campaign_date && !moment(campaign_date).isValid()) {
+      return res.status(400).json({ status: 400, message: "Invalid campaign_date" });
     }
 
-    const platformRules = await fetchEffectivePlatformRules();
-    const selectedPlatformRule = normalizedMediaType
-      ? platformRules[normalizedMediaType] || null
-      : null;
+    // Parse per-society asset selections: society_assets[societyId] = JSON string of assets array
+    // Each asset: { key, label, permission_cost }
+    const societyAssetsMap = {};
 
-    if (normalizedMediaType && campaign_date) {
-      const minLeadDays = Number(selectedPlatformRule?.min_lead_days || 0);
-      const minAllowedDate = moment().startOf("day").add(minLeadDays, "days");
-      const chosenDate = moment(campaign_date).startOf("day");
-
-      if (!chosenDate.isValid()) {
-        return res.status(400).json({
-          status: 400,
-          message: "Invalid campaign_date",
+    // Primary: single JSON blob (avoids multer bracket-key issues)
+    if (req.body.society_assets_json) {
+      try {
+        const parsed = JSON.parse(req.body.society_assets_json);
+        Object.entries(parsed).forEach(([socId, assets]) => {
+          societyAssetsMap[Number(socId)] = Array.isArray(assets) ? assets : [];
         });
-      }
-
-      if (chosenDate.isBefore(minAllowedDate)) {
-        return res.status(400).json({
-          status: 400,
-          message: `Campaign start date for selected platform must be at least ${minLeadDays} day(s) from today`,
-          min_allowed_date: minAllowedDate.format("YYYY-MM-DD"),
-          platform_constraints: selectedPlatformRule,
-        });
+      } catch {
+        // ignore malformed JSON
       }
     }
 
-    const selectedSocietyIds = resolveRequestedSocietyIds(req.body);
-    const conflicts = await findConflictingBookings({
-      selectedSocietyIds,
-      mediaType: normalizedMediaType,
-      campaignDate: campaign_date,
-      excludeCampaignId: id || null,
-    });
-    if (conflicts.length > 0) {
-      return res.status(400).json({
-        status: 400,
-        message:
-          "Another non-cancelled campaign already exists for the same society, platform and date",
-        conflicts,
-      });
+    // Fallback: per-field bracket notation (legacy support)
+    for (const key in req.body) {
+      const match = key.match(/^society_assets\[(\d+)\]$/);
+      if (match) {
+        const socId = Number(match[1]);
+        if (societyAssetsMap[socId] === undefined) {
+          try {
+            societyAssetsMap[socId] = JSON.parse(req.body[key]);
+          } catch {
+            societyAssetsMap[socId] = [];
+          }
+        }
+      }
     }
 
-    const pricingBySociety = {};
-    let resolvedCampaignAmount = Number(campaign_amount) || 0;
+    // Collect society IDs from society_assets keys + legacy society_ind_ids
+    const selectedSocietyIds = Object.keys(societyAssetsMap).map(Number);
+    // Also include legacy society_ind_ids for backward compat
+    const legacySocietyIds = resolveRequestedSocietyIds(req.body);
+    const allSocietyIds = [...new Set([...selectedSocietyIds, ...legacySocietyIds])];
 
-    if (
-      normalizedMediaType &&
-      isValidMediaType(normalizedMediaType) &&
-      selectedSocietyIds.length > 0
-    ) {
-      let runningTotal = 0;
-      for (const societyId of selectedSocietyIds) {
-        const activeRateCard = await getActiveRateCardForDate(
-          societyId,
-          normalizedMediaType,
-          campaign_date,
-        );
-        const breakup = activeRateCard
-          ? calculateRateBreakup(
-              Number(activeRateCard.society_rate) || 0,
-              normalizedMediaType,
-            )
-          : calculateRateBreakup(0, normalizedMediaType);
+    // Compute per-society subtotals from selected assets (permission costs)
+    const subtotalBySociety = {};
+    let resolvedCampaignAmount = 0;
 
-        pricingBySociety[societyId] = breakup;
-        runningTotal += breakup.company_rate;
+    if (allSocietyIds.length > 0) {
+      for (const societyId of allSocietyIds) {
+        const assets = societyAssetsMap[societyId];
+        if (Array.isArray(assets) && assets.length > 0) {
+          const subtotal = assets.reduce((sum, a) => sum + Number(a.permission_cost || 0), 0);
+          subtotalBySociety[societyId] = subtotal;
+          resolvedCampaignAmount += subtotal;
+        } else {
+          subtotalBySociety[societyId] = 0;
+        }
       }
-      resolvedCampaignAmount = Number(runningTotal.toFixed(2));
+      resolvedCampaignAmount = Number(resolvedCampaignAmount.toFixed(2));
+    }
+
+    // If no per-society assets provided, fall back to campaign_amount from body
+    if (allSocietyIds.length === 0 || Object.values(subtotalBySociety).every(v => v === 0)) {
+      resolvedCampaignAmount = Number(campaign_amount) || 0;
     }
 
     const requestedCampaignStatus = campaign_status || "draft";
@@ -1673,29 +1693,6 @@ exports.createOrUpdateCampaign = async (req, res) => {
       );
     }
 
-    const buildSocietyPricingPayload = (societyId) => {
-      const pricing = pricingBySociety[Number(societyId)];
-      if (!pricing) {
-        return {
-          campaign_ads_amount: Number(campaign_ads_amount) || 0,
-          media_type: normalizedMediaType || null,
-          society_rate_snapshot: null,
-          platform_commission_pct_snapshot: null,
-          platform_rate_snapshot: null,
-          company_rate_snapshot: null,
-        };
-      }
-
-      return {
-        campaign_ads_amount: pricing.company_rate,
-        media_type: normalizedMediaType,
-        society_rate_snapshot: pricing.society_rate,
-        platform_commission_pct_snapshot: pricing.platform_commission_pct,
-        platform_rate_snapshot: pricing.platform_rate,
-        company_rate_snapshot: pricing.company_rate,
-      };
-    };
-
     let campaign;
     let CampaignLogs = []; // Initialize empty array to store logs
 
@@ -1706,10 +1703,11 @@ exports.createOrUpdateCampaign = async (req, res) => {
       if (campaign) {
         let finalCampaignStatus = campaign.campaign_status;
 
+        // CAMPAIGN LOCK: Paid/pending campaigns cannot be altered
         if (campaign.campaign_status === "pending") {
-          return res.status(400).json({
-            status: 400,
-            message: "Campaign already created and is pending",
+          return res.status(403).json({
+            status: 403,
+            message: "Campaign is locked — payment has been made and no further changes are allowed.",
           });
         }
 
@@ -1719,22 +1717,16 @@ exports.createOrUpdateCampaign = async (req, res) => {
         campaign = await campaign.update({
           company_id: comapnyId,
           company_user_id: comapnyUserId,
-          campaign_type,
-          creative_type,
-          lead_generation_url,
-          survey_url,
           campaign_name,
           campaign_amount: resolvedCampaignAmount,
           campaign_date,
-          media_type: normalizedMediaType || null,
+          campaign_city_id,
           campaign_area_id,
           campaign_address,
           my_ads_location_latitude,
           my_ads_location_longitude,
           radius_km,
           search_by_google_location,
-          brand_promotions_creative,
-          creative_text,
           campaign_status: finalCampaignStatus,
           modified_ip_address: req.ip,
           modified_type: userType,
@@ -1751,336 +1743,91 @@ exports.createOrUpdateCampaign = async (req, res) => {
 
         let userMessage = "Campaign updated successfully";
 
-        let creativeImage = null;
-        let creativeVideo = null;
         const CampaignLogs = [];
 
-        const usedSocietyIds = new Set();
+        // Collect society IDs from new societyAssetsMap (primary) + legacy fields
+        const usedSocietyIdsSet = new Set(allSocietyIds);
+        const usedSocietyIds = [...usedSocietyIdsSet];
 
-        // ✅ Step A: From req.body.society_ids (if any)
-        if (Array.isArray(req.body.society_ids)) {
-          req.body.society_ids.forEach((id) => {
-            const num = parseInt(id);
-            if (!isNaN(num)) usedSocietyIds.add(num);
-          });
-        }
-        console.log(
-          "Step A - From req.body.society_ids:",
-          req.body.society_ids,
-        );
-
-        // ✅ Step B: From req.body.society_ind_ids (used as base)
-        if (Array.isArray(req.body.society_ind_ids)) {
-          req.body.society_ind_ids.forEach((id) => {
-            const num = parseInt(id);
-            if (!isNaN(num)) usedSocietyIds.add(num);
-          });
-        }
-        console.log(
-          "Step B - From req.body.society_ind_ids:",
-          req.body.society_ind_ids,
-        );
-
-        // ✅ Step C: From societies_text[ID] keys
-        const textKeys = [];
-        for (const key in req.body) {
-          const match = key.match(/^societies_text\[(\d+)\]$/);
-          if (match) {
-            const socId = parseInt(match[1]);
-            if (!isNaN(socId)) usedSocietyIds.add(socId);
-            textKeys.push(`${key}: ${req.body[key]}`);
-          }
-        }
-        console.log("Step C - From societies_text keys:", textKeys);
-
-        // ✅ Step D: From upload_societies_images_path[ID] keys
-        const imageKeys = [];
-        for (const key in req.body) {
-          const match = key.match(/^upload_societies_images_path\[(\d+)\]$/);
-          if (match) {
-            const socId = parseInt(match[1]);
-            if (!isNaN(socId)) usedSocietyIds.add(socId);
-            imageKeys.push(`${key}: ${req.body[key]}`);
-          }
-        }
-        console.log(
-          "Step D - From upload_societies_images_path keys:",
-          imageKeys,
-        );
-
-        // ✅ Final Combined Set
-        const finalUsedSocietyIds = Array.from(usedSocietyIds);
-        const societyIds = [...finalUsedSocietyIds];
-        console.log(
-          "✅ All collected society IDs (usedSocietyIds):",
-          finalUsedSocietyIds,
-        );
-
-        // ✅ Fetch existing logs
+        // Delete logs for societies no longer selected
         const existingLogs = await Campaign_Log.findAll({
           where: { campaign_id: campaign.id },
           attributes: ["society_id"],
         });
         const existingSocietyIds = existingLogs.map((log) => log.society_id);
-        console.log("📦 Existing society_ids in DB:", existingSocietyIds);
-
-        // ✅ Find IDs to delete
         const toDeleteSocietyIds = existingSocietyIds.filter(
-          (id) => !usedSocietyIds.has(id),
+          (id) => !usedSocietyIdsSet.has(id),
         );
-        console.log("🗑️ Society IDs to delete:", toDeleteSocietyIds);
-
-        // ✅ Delete
         if (toDeleteSocietyIds.length > 0) {
           await Campaign_Log.destroy({
-            where: {
-              campaign_id: campaign.id,
-              society_id: toDeleteSocietyIds,
-            },
+            where: { campaign_id: campaign.id, society_id: toDeleteSocietyIds },
           });
-          console.log("✅ Deleted society_ids:", toDeleteSocietyIds);
         }
 
-        // Function to handle file uploads and logs
-        const processFileForSocieties = async (file, societyIds) => {
-          const imagePath = `uploads/${file.filename}`;
-          const imageName = file.filename;
+        // Build log data for a society
+        const buildLogData = (socId, extraFields = {}) => ({
+          campaign_id: campaign.id,
+          company_id: comapnyId,
+          company_user_id: comapnyUserId,
+          society_id: socId,
+          campaign_name,
+          campaign_date,
+          campaign_area_id,
+          selected_assets: societyAssetsMap[socId] || null,
+          subtotal: subtotalBySociety[socId] || 0,
+          campaign_ads_amount: subtotalBySociety[socId] || 0,
+          campaign_status: finalCampaignStatus,
+          ...extraFields,
+        });
 
-          for (const socId of societyIds) {
-            const existingLog = await Campaign_Log.findOne({
-              where: { campaign_id: campaign.id, society_id: socId },
-            });
-
-            let logData = {
-              campaign_id: campaign.id,
-              company_id: comapnyId,
-              company_user_id: comapnyUserId,
-              society_id: socId,
-              campaign_type,
-              creative_type,
-              lead_generation_url,
-              survey_url,
-              campaign_name,
-              campaign_date,
-              campaign_area_id,
-              ...buildSocietyPricingPayload(socId),
-              my_ads_location_latitude,
-              my_ads_location_longitude,
-              radius_km,
-              search_by_google_location,
-              brand_promotions_creative,
-              creative_text,
-              campaign_status: finalCampaignStatus,
-              societies_text: req.body.societies_text || null,
-              upload_societies_images_path: imagePath,
-              upload_societies_images_name: imageName,
-            };
-
-            if (existingLog) {
-              await existingLog.update({
-                ...logData,
-                modified_ip_address: req.ip,
-                modified_by:
-                  userType === "Company_User" ? comapnyUserId : comapnyId,
-                modified_type: userType,
-              });
-              CampaignLogs.push(existingLog);
-            } else {
-              const newLog = await Campaign_Log.create({
-                ...logData,
-                created_ip_address: req.ip,
-                created_by:
-                  userType === "Company_User" ? comapnyUserId : comapnyId,
-                created_type: userType,
-              });
-              CampaignLogs.push(newLog);
-            }
-          }
-        };
-
-        // Handle files
-        // const societiesText = req.body.societies_text || [];
-        let societiesText = [];
-
-        if (req.body.societies_text) {
-          if (typeof req.body.societies_text === "string") {
-            try {
-              const parsed = JSON.parse(req.body.societies_text);
-              societiesText = Array.isArray(parsed) ? parsed : [];
-            } catch (e) {
-              societiesText = [];
-            }
-          } else if (Array.isArray(req.body.societies_text)) {
-            societiesText = req.body.societies_text;
-          }
-        }
-
+        // Process WhatsApp creative uploads per society
+        const whatsappCreativeBySociety = {};
         if (Array.isArray(req.files)) {
           for (const file of req.files) {
-            const fieldName = file.fieldname;
-            if (fieldName === "upload_creative_image_path") {
-              creativeImage = file;
-            } else if (fieldName === "upload_creative_video_path") {
-              creativeVideo = file;
-            } else if (fieldName.startsWith("upload_societies_images_path[")) {
-              const match = fieldName.match(
-                /^upload_societies_images_path\[(\d+)\]$/,
-              );
-              if (match) {
-                const socId = match[1];
-                await processFileForSocieties(file, [socId]);
-              }
+            const match = file.fieldname.match(/^upload_societies_images_path\[(\d+)\]$/);
+            if (match) {
+              whatsappCreativeBySociety[Number(match[1])] = {
+                path: `uploads/${file.filename}`,
+                name: file.filename,
+              };
             }
-          }
-
-          // Process common creative image/video for all societies
-          if (creativeImage && societyIds.length > 0) {
-            await processFileForSocieties(creativeImage, societyIds);
-          }
-
-          if (creativeVideo && societyIds.length > 0) {
-            await processFileForSocieties(creativeVideo, societyIds);
           }
         }
 
-        // Process societies text without images
-        // const hasSocietiesText = societiesText.some(text => text && text.trim() !== "");
-        const hasSocietiesText =
-          Array.isArray(societiesText) &&
-          societiesText.some((text) => text && text.trim() !== "");
+        // Upsert logs for each selected society
+        for (const socId of usedSocietyIds) {
+          const creative = whatsappCreativeBySociety[socId];
+          const logData = buildLogData(socId, {
+            ...(creative && {
+              upload_societies_images_path: creative.path,
+              upload_societies_images_name: creative.name,
+            }),
+          });
 
-        const rawCreativeText = req.body.brand_promotions_creative;
-        const creativeTextTrimmed =
-          typeof rawCreativeText === "string" ? rawCreativeText.trim() : "";
-        const useCommonText =
-          creativeTextTrimmed !== "" &&
-          creativeTextTrimmed.toLowerCase() !== "false";
-        const commonText = useCommonText
-          ? societiesText[0] && societiesText[0].toLowerCase() !== "false"
-            ? societiesText[0]
-            : creativeTextTrimmed
-          : null;
+          const existingLog = await Campaign_Log.findOne({
+            where: { campaign_id: campaign.id, society_id: socId },
+          });
 
-        if (
-          hasSocietiesText &&
-          (!Array.isArray(req.files) || req.files.length === 0)
-        ) {
-          if (commonText) {
-            for (let i = 0; i < societyIds.length; i++) {
-              const socId = societyIds[i];
-              const text = useCommonText ? commonText : societiesText[i];
-
-              if (text && text.trim() !== "") {
-                const existingLog = await Campaign_Log.findOne({
-                  where: { campaign_id: campaign.id, society_id: socId },
-                });
-
-                let logData = {
-                  campaign_id: campaign.id,
-                  company_id: comapnyId,
-                  company_user_id: comapnyUserId,
-                  society_id: socId,
-                  campaign_type,
-                  creative_type,
-                  lead_generation_url,
-                  survey_url,
-                  campaign_name,
-                  campaign_date,
-                  campaign_area_id,
-                  ...buildSocietyPricingPayload(socId),
-                  my_ads_location_latitude,
-                  my_ads_location_longitude,
-                  radius_km,
-                  search_by_google_location,
-                  brand_promotions_creative,
-                  creative_text,
-                  campaign_status: finalCampaignStatus,
-                  societies_text: text,
-                  upload_societies_images_path: null,
-                  upload_societies_images_name: null,
-                };
-
-                if (existingLog) {
-                  await existingLog.update({
-                    ...logData,
-                    modified_ip_address: req.ip,
-                    modified_by:
-                      userType === "Company_User" ? comapnyUserId : comapnyId,
-                    modified_type: userType,
-                  });
-                  CampaignLogs.push(existingLog);
-                } else {
-                  const newLog = await Campaign_Log.create({
-                    ...logData,
-                    created_ip_address: req.ip,
-                    created_by:
-                      userType === "Company_User" ? comapnyUserId : comapnyId,
-                    created_type: userType,
-                  });
-                  CampaignLogs.push(newLog);
-                }
-              }
-            }
+          if (existingLog) {
+            await existingLog.update({
+              ...logData,
+              modified_ip_address: req.ip,
+              modified_by: userType === "Company_User" ? comapnyUserId : comapnyId,
+              modified_type: userType,
+            });
+            CampaignLogs.push(existingLog);
           } else {
-            for (let i = 0; i < societiesText.length; i++) {
-              const text = societiesText[i];
-              if (text && text.trim() !== "") {
-                // Map i as index for societyIds
-                const socId = i;
-
-                const existingLog = await Campaign_Log.findOne({
-                  where: { campaign_id: campaign.id, society_id: socId },
-                });
-
-                let logData = {
-                  campaign_id: campaign.id,
-                  company_id: comapnyId,
-                  company_user_id: comapnyUserId,
-                  society_id: socId,
-                  campaign_type,
-                  creative_type,
-                  lead_generation_url,
-                  survey_url,
-                  campaign_name,
-                  campaign_date,
-                  campaign_area_id,
-                  ...buildSocietyPricingPayload(socId),
-                  my_ads_location_latitude,
-                  my_ads_location_longitude,
-                  radius_km,
-                  search_by_google_location,
-                  brand_promotions_creative,
-                  creative_text,
-                  campaign_status: finalCampaignStatus,
-                  societies_text: text,
-                  upload_societies_images_path: null,
-                  upload_societies_images_name: null,
-                };
-
-                if (existingLog) {
-                  await existingLog.update({
-                    ...logData,
-                    modified_ip_address: req.ip,
-                    modified_by:
-                      userType === "Company_User" ? comapnyUserId : comapnyId,
-                    modified_type: userType,
-                  });
-                  CampaignLogs.push(existingLog);
-                } else {
-                  const newLog = await Campaign_Log.create({
-                    ...logData,
-                    created_ip_address: req.ip,
-                    created_by:
-                      userType === "Company_User" ? comapnyUserId : comapnyId,
-                    created_type: userType,
-                  });
-                  CampaignLogs.push(newLog);
-                }
-              }
-            }
+            const newLog = await Campaign_Log.create({
+              ...logData,
+              created_ip_address: req.ip,
+              created_by: userType === "Company_User" ? comapnyUserId : comapnyId,
+              created_type: userType,
+            });
+            CampaignLogs.push(newLog);
           }
         }
-        if (campaign.campaign_status === "pending") {
+
+        if (finalCampaignStatus === "pending") {
           await Notification.create({
             company_ids: [comapnyId], // Uncomment if needed
             message: `Campaign #${campaign.id_prifix_campaign} has been created by the company and is awaiting approval.`,
@@ -2113,14 +1860,9 @@ exports.createOrUpdateCampaign = async (req, res) => {
     const newCampaign = await Campaign.create({
       company_id: comapnyId,
       company_user_id: comapnyUserId,
-      campaign_type,
-      creative_type,
-      lead_generation_url,
-      survey_url,
       campaign_amount: resolvedCampaignAmount,
       campaign_name,
       campaign_date,
-      media_type: normalizedMediaType || null,
       campaign_city_id,
       campaign_area_id,
       campaign_address,
@@ -2128,8 +1870,6 @@ exports.createOrUpdateCampaign = async (req, res) => {
       my_ads_location_longitude,
       radius_km,
       search_by_google_location,
-      brand_promotions_creative,
-      creative_text,
       campaign_status: finalCampaignStatus,
       created_ip_address: req.ip,
       created_type: userType,
@@ -2149,208 +1889,45 @@ exports.createOrUpdateCampaign = async (req, res) => {
       paidAt,
     });
 
-    const societyIds = req.body.society_ids || [];
-
-    const processFileForSocieties = async (file, societyIds) => {
-      const imagePath = `uploads/${file.filename}`;
-      const imageName = file.filename;
-
-      // Iterate over all society IDs and create a log entry for each society
-      for (const socId of societyIds) {
-        const log = await Campaign_Log.create({
-          campaign_id: newCampaign.id,
-          company_id: comapnyId,
-          company_user_id: comapnyUserId,
-          society_id: socId,
-          campaign_type,
-          creative_type,
-          lead_generation_url,
-          survey_url,
-          campaign_name,
-          campaign_date,
-          campaign_area_id,
-          ...buildSocietyPricingPayload(socId),
-          my_ads_location_latitude,
-          my_ads_location_longitude,
-          radius_km,
-          search_by_google_location,
-          brand_promotions_creative,
-          creative_text,
-          campaign_status,
-          societies_text,
-          upload_societies_images_path: imagePath,
-          upload_societies_images_name: imageName,
-          created_ip_address: req.ip,
-          created_by: userType === "Company_User" ? comapnyUserId : comapnyId,
-          created_type: userType,
-        });
-
-        // Push the log to the CampaignLogs array
-        CampaignLogs.push(log);
-      }
-    };
-
-    let creativeImage = null;
-    let creativeVideo = null;
-
+    // Collect per-society WhatsApp creatives from file uploads
+    const newCampaignCreativeBySociety = {};
     if (Array.isArray(req.files)) {
       for (const file of req.files) {
-        const fieldName = file.fieldname;
-        console.log(`Processing field: ${fieldName}`);
-
-        // Check if it's the creative image path
-        if (fieldName === "upload_creative_image_path") {
-          creativeImage = file;
-        }
-
-        // Check if it's the creative video path
-        else if (fieldName === "upload_creative_video_path") {
-          creativeVideo = file;
-        }
-
-        // Check if it's a society image path (uploads for multiple society images)
-        else if (fieldName.startsWith("upload_societies_images_path")) {
-          const match = fieldName.match(
-            /^upload_societies_images_path\[(\d+)\]$/,
-          );
-          if (match) {
-            const socId = match[1]; // Extract society ID from the fieldname
-            await processFileForSocieties(file, [socId]); // Process society image
-          }
-        }
-      }
-
-      // If creative image exists, process it for all society IDs
-      if (creativeImage && societyIds.length > 0) {
-        await processFileForSocieties(creativeImage, societyIds);
-      }
-
-      // If creative video exists, process it for all society IDs
-      if (creativeVideo && societyIds.length > 0) {
-        await processFileForSocieties(creativeVideo, societyIds);
-      }
-    }
-
-    let societiesText = [];
-
-    if (req.body.societies_text) {
-      if (typeof req.body.societies_text === "string") {
-        try {
-          const parsed = JSON.parse(req.body.societies_text);
-          societiesText = Array.isArray(parsed) ? parsed : [];
-        } catch (e) {
-          societiesText = [];
-        }
-      } else if (Array.isArray(req.body.societies_text)) {
-        societiesText = req.body.societies_text;
-      }
-    }
-
-    // const hasSocietiesText = societiesText.some(text => text && text.trim() !== "");
-
-    const hasSocietiesText =
-      Array.isArray(societiesText) &&
-      societiesText.some((text) => text && text.trim() !== "");
-
-    const rawCreativeText = req.body.brand_promotions_creative;
-    const creativeText =
-      typeof rawCreativeText === "string" ? rawCreativeText.trim() : "";
-
-    const useCommonText =
-      creativeText !== "" && creativeText.toLowerCase() !== "false";
-
-    // Now determine the common text if any
-    const commonText = useCommonText
-      ? societiesText[0] && societiesText[0].toLowerCase() !== "false"
-        ? societiesText[0]
-        : creativeText
-      : null;
-    console.log("commonText", commonText);
-
-    // ✅ Handle societies_text separately (only if present)
-    if (hasSocietiesText) {
-      if (commonText) {
-        // Common text for all societies
-        for (let i = 0; i < societyIds.length; i++) {
-          const socId = societyIds[i];
-          const log = await Campaign_Log.create({
-            campaign_id: newCampaign.id,
-
-            company_id: comapnyId,
-            company_user_id: comapnyUserId,
-            society_id: socId,
-            campaign_type,
-            creative_type,
-            lead_generation_url,
-            survey_url,
-            campaign_name,
-            campaign_date,
-            campaign_area_id,
-            ...buildSocietyPricingPayload(socId),
-            my_ads_location_latitude,
-            my_ads_location_longitude,
-            radius_km,
-            search_by_google_location,
-            brand_promotions_creative,
-            creative_text,
-            campaign_status,
-            societies_text: commonText, // common text here
-            upload_societies_images_path: null,
-            upload_societies_images_name: null,
-            created_ip_address: req.ip,
-            created_by: userType === "Company_User" ? comapnyUserId : comapnyId,
-            created_type: userType,
-          });
-
-          CampaignLogs.push(log);
-        }
-      } else {
-        // Individual text for societies
-        for (let i = 0; i < societiesText.length; i++) {
-          const text = societiesText[i];
-          if (text && text.trim() !== "") {
-            // Map i as index for societyIds
-            const socId = i;
-
-            const log = await Campaign_Log.create({
-              campaign_id: newCampaign.id,
-              company_id: comapnyId,
-              company_user_id: comapnyUserId,
-              society_id: socId,
-              campaign_type,
-              creative_type,
-              lead_generation_url,
-              survey_url,
-              campaign_name,
-              campaign_date,
-              campaign_area_id,
-              ...buildSocietyPricingPayload(socId),
-              my_ads_location_latitude,
-              my_ads_location_longitude,
-              radius_km,
-              search_by_google_location,
-              brand_promotions_creative,
-              creative_text,
-              campaign_status,
-              societies_text: text, // specific text here
-              upload_societies_images_path: null,
-              upload_societies_images_name: null,
-              created_ip_address: req.ip,
-              created_by:
-                userType === "Company_User" ? comapnyUserId : comapnyId,
-              created_type: userType,
-            });
-
-            CampaignLogs.push(log);
-          }
+        const match = file.fieldname.match(/^upload_societies_images_path\[(\d+)\]$/);
+        if (match) {
+          newCampaignCreativeBySociety[Number(match[1])] = {
+            path: `uploads/${file.filename}`,
+            name: file.filename,
+          };
         }
       }
     }
 
-    //  const formattedId = newCampaign.id < 10 ? `0${newCampaign.id}` : `${newCampaign.id}`;
-    //  const  generatedPrefixCampaign = `ADZ10XCP${formattedId}`;
-
-    await newCampaign.update({ id_prifix_campaign: generatedPrefixCampaign });
+    // Create a Campaign_Log for each selected society
+    for (const socId of allSocietyIds) {
+      const creative = newCampaignCreativeBySociety[socId];
+      const log = await Campaign_Log.create({
+        campaign_id: newCampaign.id,
+        company_id: comapnyId,
+        company_user_id: comapnyUserId,
+        society_id: socId,
+        campaign_name,
+        campaign_date,
+        campaign_area_id,
+        selected_assets: societyAssetsMap[socId] || null,
+        subtotal: subtotalBySociety[socId] || 0,
+        campaign_ads_amount: subtotalBySociety[socId] || 0,
+        campaign_status: finalCampaignStatus,
+        ...(creative && {
+          upload_societies_images_path: creative.path,
+          upload_societies_images_name: creative.name,
+        }),
+        created_ip_address: req.ip,
+        created_by: userType === "Company_User" ? comapnyUserId : comapnyId,
+        created_type: userType,
+      });
+      CampaignLogs.push(log);
+    }
 
     for (const log of CampaignLogs) {
       const formattedLogId = log.id < 10 ? `0${log.id}` : `${log.id}`;

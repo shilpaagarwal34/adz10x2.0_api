@@ -167,6 +167,22 @@ const Campaign_Log = sequelize.define('Campaign_Log',{
           type: DataTypes.BIGINT,
           allowNull: true,
       },
+      selected_assets: {
+          type: DataTypes.TEXT,
+          allowNull: true,
+          get() {
+              const raw = this.getDataValue('selected_assets');
+              if (!raw) return null;
+              try { return JSON.parse(raw); } catch { return null; }
+          },
+          set(val) {
+              this.setDataValue('selected_assets', val ? JSON.stringify(val) : null);
+          }
+      },
+      subtotal: {
+          type: DataTypes.FLOAT,
+          allowNull: true,
+      },
       status: {
           type: DataTypes.ENUM('active', 'delete', 'inactive'),
           defaultValue: 'active',
