@@ -26,7 +26,8 @@ exports.societyDataTable = async (req, res) => {
         // Base condition
         const whereClause = { 
             // status: 'active'
-            status: { [Op.ne]: 'delete' } 
+            status: { [Op.ne]: 'delete' },
+            is_agree_terms_condition: true
         };
 
         // If Relationship Manager, filter societies by their ID

@@ -24,7 +24,7 @@ exports.dashboardCountAdmin = async (req, res) => {
     }
 
     // Base conditions
-    let societyWhere = { status: "active" };
+    let societyWhere = { status: "active", is_agree_terms_condition: true };
     let campaignWhere = { status: "active" };
     let companyWhere = { status: "active" };
 
