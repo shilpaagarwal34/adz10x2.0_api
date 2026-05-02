@@ -36,7 +36,9 @@ app.options('*', (req, res) => {
 });
 
 //  Body parser
-app.use(bodyParser.json());
+// app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: "5mb" }));
+app.use(bodyParser.urlencoded({ limit: "5mb", extended: true }));
 
 //  Serve static files
 app.use('/uploads', express.static('uploads')); // Uploaded files (images, docs, etc.)
