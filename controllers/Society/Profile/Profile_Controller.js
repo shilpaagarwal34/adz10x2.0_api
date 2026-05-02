@@ -65,10 +65,12 @@ const computeSocietyProfileCompletionPercent = (user, profile) => {
   const filledContact = contactInfo.filter(isFilled).length;
   const filledLocation = location.filter(isFilled).length;
 
+  // Basic/contact/location buckets contribute up to 95%; the remaining 5% requires agreement acceptance
   let completion = 0;
-  completion += (filledBasic / basicDetails.length) * 30;
-  completion += (filledContact / contactInfo.length) * 35;
-  completion += (filledLocation / location.length) * 35;
+  completion += (filledBasic / basicDetails.length) * 28.5;
+  completion += (filledContact / contactInfo.length) * 33.25;
+  completion += (filledLocation / location.length) * 33.25;
+  if (user.is_agree_terms_condition) completion += 5;
   return Math.round(Math.min(100, completion));
 };
 
@@ -1442,6 +1444,35 @@ exports.getCampaignDays = async (req, res) => {
             media_platforms: mediaPlatforms
         });
 
+    } catch (error) {
+        return res.status(500).json({ status: 500, error: error.message });
+    }
+};
+
+exports.acceptAgreement = async (req, res) => {
+    try {
+        let societyId = null;
+        const userId = req.user.id;
+        const userType = req.user_type;
+
+        if (userType === 'Society_Admin') {
+            societyId = userId;
+        } else if (userType === 'Society_User') {
+            const societyUser = await Society_User.findOne({ where: { id: userId } });
+            if (!societyUser) return res.status(404).json({ status: 404, message: 'Society user not found' });
+            societyId = societyUser.society_id;
+        }
+
+        if (!societyId) {
+            return res.status(400).json({ status: 400, message: 'Unable to determine society' });
+        }
+
+        await Society_Registration.update(
+            { is_agree_terms_condition: true },
+            { where: { id: societyId } }
+        );
+
+        return res.status(200).json({ status: 200, message: 'Agreement accepted successfully' });
     } catch (error) {
         return res.status(500).json({ status: 500, error: error.message });
     }
