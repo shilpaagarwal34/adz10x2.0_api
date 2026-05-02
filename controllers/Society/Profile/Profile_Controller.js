@@ -70,8 +70,19 @@ const computeSocietyProfileCompletionPercent = (user, profile) => {
   completion += (filledBasic / basicDetails.length) * 28.5;
   completion += (filledContact / contactInfo.length) * 33.25;
   completion += (filledLocation / location.length) * 33.25;
-  if (user.is_agree_terms_condition) completion += 5;
-  return Math.round(Math.min(100, completion));
+  
+  if (user.is_agree_terms_condition === true) {
+      completion += 5;
+  }
+  
+  let finalCompletion = Math.round(completion);
+
+  // Strictly enforce that if terms are not agreed, completion cannot be 100%
+  if (user.is_agree_terms_condition !== true && finalCompletion >= 100) {
+      finalCompletion = 99;
+  }
+
+  return Math.min(100, finalCompletion);
 };
 
 exports.getSocietyProfile = async (req, res) => {
