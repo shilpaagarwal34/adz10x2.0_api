@@ -255,6 +255,7 @@ router.get('/society-profile-ads',authenticateSocietyUser, profileController.get
 router.get('/society/media-rate-cards', authenticateSocietyUser, profileController.getSocietyMediaRateCards);
 router.post('/society/media-rate-cards', authenticateSocietyUser, profileController.upsertSocietyMediaRateCards);
 router.post('/society-profile', authenticateSocietyUser ,profileController.getSocietyProfile);
+router.get('/society/agreement', authenticateSocietyUser, profileController.getSocietyAgreement);
 router.post('/society/accept-agreement', authenticateSocietyUser, profileController.acceptAgreement);
 
 // router.post('/society-profile')

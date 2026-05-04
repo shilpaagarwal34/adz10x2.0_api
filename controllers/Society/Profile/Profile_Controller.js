@@ -163,6 +163,7 @@ exports.getSocietyProfile = async (req, res) => {
                    kyc_status: user.kyc_status,
                    aggrement_copy_path: user.aggrement_copy_path,
                    is_agree_terms_condition: user.is_agree_terms_condition,
+                   agreement_accepted_at: user.agreement_accepted_at,
                  
                    society_profile: profile || null,
                    edit_permission: check_edit.allow_edit
@@ -269,6 +270,7 @@ exports.getSocietyProfiles = async (req, res) => {
                    kyc_status: user.kyc_status,
                    aggrement_copy_path: user.aggrement_copy_path,
                    is_agree_terms_condition: user.is_agree_terms_condition,
+                   agreement_accepted_at: user.agreement_accepted_at,
                  
                    society_profile: profile || null,
                    edit_permission: check_edit.allow_edit
@@ -1035,6 +1037,32 @@ exports.societyRegistrationUpdateImage = async (req, res) => {
       }
     }
 
+    // ✅ Handle agreement checkbox - save timestamp on first acceptance
+    if (
+      req.body.is_agree_terms_condition === true &&
+      !check_edit.agreement_accepted_at
+    ) {
+      await Society_Registration.update(
+        { 
+          is_agree_terms_condition: true,
+          agreement_accepted_at: new Date()
+        },
+        { where: { id: societyId } }
+      );
+    } else if (req.body.is_agree_terms_condition === true) {
+      // Update agreement status but preserve original timestamp
+      await Society_Registration.update(
+        { is_agree_terms_condition: true },
+        { where: { id: societyId } }
+      );
+    } else if (req.body.is_agree_terms_condition === false) {
+      // Allow unchecking agreement (optional - based on requirements)
+      await Society_Registration.update(
+        { is_agree_terms_condition: false },
+        { where: { id: societyId } }
+      );
+    }
+
     return res.status(200).json({
       status: 200,
       message: "Society details updated successfully",
@@ -1460,6 +1488,102 @@ exports.getCampaignDays = async (req, res) => {
     }
 };
 
+exports.getSocietyAgreement = async (req, res) => {
+    try {
+        let societyId = null;
+        const userId = req.user.id;
+        const userType = req.user_type;
+
+        if (userType === 'Society_Admin') {
+            societyId = userId;
+        } else if (userType === 'Society_User') {
+            const societyUser = await Society_User.findOne({ where: { id: userId } });
+            if (!societyUser) return res.status(404).json({ status: 404, message: 'Society user not found' });
+            societyId = societyUser.society_id;
+        }
+
+        if (!societyId) {
+            return res.status(400).json({ status: 400, message: 'Unable to determine society' });
+        }
+
+        const society = await Society_Registration.findByPk(societyId);
+        
+        if (!society) {
+            return res.status(404).json({ status: 404, message: 'Society not found' });
+        }
+
+        // Format timestamp as "02 May 2026, 11:45 PM"
+        const formatTimestamp = (date) => {
+            if (!date) return "Not yet recorded";
+            const d = new Date(date);
+            const day = String(d.getDate()).padStart(2, '0');
+            const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+            const month = monthNames[d.getMonth()];
+            const year = d.getFullYear();
+            const hours = d.getHours();
+            const ampm = hours >= 12 ? 'PM' : 'AM';
+            const displayHours = hours % 12 || 12;
+            const minutes = String(d.getMinutes()).padStart(2, '0');
+            return `${day} ${month} ${year}, ${displayHours}:${minutes} ${ampm}`;
+        };
+
+        // Agreement template with static text that needs to be replaced
+        let agreementText = `THIS AGREEMENT is made on this _____ day of _______________, 20__ BETWEEN:
+
+PARTY A: ADz10x Media Private Limited, a company incorporated under the Companies Act, 2013, having its registered office at __________________________ (hereinafter referred to as "Party A").
+
+PARTY B: The Co-operative Housing Society / RWA, having its registered office at __________________________ (hereinafter referred to as "Party B").
+
+WHEREAS Party A is engaged in the business of digital advertising and media services, and Party B wishes to avail such services for the benefit of its members.
+
+NOW, THEREFORE, IT IS HEREBY AGREED AS FOLLOWS:
+
+1. Party B agrees to allow Party A to display advertisements on the society premises including but not limited to notice boards, WhatsApp groups, and other common areas.
+
+2. Party A shall pay Party B a commission as per the rates agreed upon from time to time.
+
+3. The term of this agreement shall be for a period of one year from the date of signing and may be renewed by mutual consent.
+
+4. Either party may terminate this agreement by giving 30 days written notice to the other party.
+
+5. This agreement constitutes the entire understanding between the parties and supersedes all prior agreements, whether oral or written.
+
+CONSENT TIMESTAMP: Already recorded
+
+IN WITNESS WHEREOF, the parties have executed this agreement on the date first above mentioned.
+
+For Party A: ________________________
+
+For Party B: ________________________`;
+
+        // Replace the static text with actual society name
+        agreementText = agreementText.replace(
+            "The Co-operative Housing Society / RWA",
+            society.society_name
+        );
+
+        // Replace consent timestamp with actual timestamp if agreement has been accepted
+        const consentTimestamp = formatTimestamp(society.agreement_accepted_at);
+        agreementText = agreementText.replace(
+            "CONSENT TIMESTAMP: Already recorded",
+            `CONSENT TIMESTAMP: ${consentTimestamp}`
+        );
+
+        return res.status(200).json({
+            status: 200,
+            message: "Agreement fetched successfully",
+            data: {
+                agreement_text: agreementText,
+                society_name: society.society_name,
+                is_agree_terms_condition: society.is_agree_terms_condition,
+                agreement_accepted_at: society.agreement_accepted_at
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({ status: 500, error: error.message });
+    }
+};
+
 exports.acceptAgreement = async (req, res) => {
     try {
         let societyId = null;
@@ -1478,12 +1602,48 @@ exports.acceptAgreement = async (req, res) => {
             return res.status(400).json({ status: 400, message: 'Unable to determine society' });
         }
 
+        const society = await Society_Registration.findByPk(societyId);
+        
+        if (!society) {
+            return res.status(404).json({ status: 404, message: 'Society not found' });
+        }
+        
+        if (society.is_agree_terms_condition) {
+            return res.status(400).json({ 
+                status: 400, 
+                message: 'Agreement already accepted. Updates are not allowed.',
+                data: {
+                    society_name: society.society_name,
+                    agreement_accepted_at: society.agreement_accepted_at
+                }
+            });
+        }
+
+        const now = new Date();
+
+        // Only set timestamp if it's the first time agreement is being accepted
+        const updateData = { 
+            is_agree_terms_condition: true
+        };
+        
+        // Only set agreement_accepted_at if it doesn't already exist (first time acceptance)
+        if (!society.agreement_accepted_at) {
+            updateData.agreement_accepted_at = now;
+        }
+
         await Society_Registration.update(
-            { is_agree_terms_condition: true },
+            updateData,
             { where: { id: societyId } }
         );
 
-        return res.status(200).json({ status: 200, message: 'Agreement accepted successfully' });
+        return res.status(200).json({ 
+            status: 200, 
+            message: 'Agreement accepted successfully',
+            data: {
+                society_name: society.society_name,
+                agreement_accepted_at: society.agreement_accepted_at || now
+            }
+        });
     } catch (error) {
         return res.status(500).json({ status: 500, error: error.message });
     }

@@ -148,6 +148,10 @@ const Society_Registration = sequelize.define('SocietyRegistration', {
           type: DataTypes.BOOLEAN, 
           defaultValue: false,
       },
+      agreement_accepted_at: {
+          type: DataTypes.DATE,
+          allowNull: true,
+      },
       approved_by: {
           type: DataTypes.BIGINT,
           allowNull: true,
