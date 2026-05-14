@@ -85,6 +85,17 @@ const computeSocietyProfileCompletionPercent = (user, profile) => {
   return Math.min(100, finalCompletion);
 };
 
+/** FormData sends booleans as "true"/"false" strings — normalize before persisting */
+const parseAgreementFlagFromBody = (value) => {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  const s = String(value).trim().toLowerCase();
+  if (s === 'true' || s === '1') return true;
+  if (s === 'false' || s === '0') return false;
+  return undefined;
+};
+
 exports.getSocietyProfile = async (req, res) => {
     try {
 
@@ -901,8 +912,11 @@ exports.societyRegistrationUpdateImage = async (req, res) => {
       return isNaN(num) ? null : num;
     };
 
-    // ✅ Update society registration
-    const society_registrations = await Society_Registration.update({
+    // ✅ Update society registration (include platform agreement flag from profile edit)
+    const agreementAccepted = parseAgreementFlagFromBody(
+      req.body.is_agree_terms_condition
+    );
+    const registrationUpdate = {
       society_name: req.body.society_name,
       name: req.body.name,
       society_user_id: user_id,
@@ -918,9 +932,14 @@ exports.societyRegistrationUpdateImage = async (req, res) => {
       society_profile_img_name: imageNames["society_profile_img_path"],
       modified_by: userId,
       modified_ip_address: req.ip,
-      modified_type: societyType || userType
-    }, {
-      where: { id: societyId }
+      modified_type: societyType || userType,
+    };
+    if (agreementAccepted !== undefined) {
+      registrationUpdate.is_agree_terms_condition = agreementAccepted;
+    }
+
+    const society_registrations = await Society_Registration.update(registrationUpdate, {
+      where: { id: societyId },
     });
 
     // ✅ Update society profile
@@ -1037,26 +1056,22 @@ exports.societyRegistrationUpdateImage = async (req, res) => {
       }
     }
 
-    // ✅ Handle agreement checkbox - save timestamp on first acceptance
-    if (
-      req.body.is_agree_terms_condition === true &&
-      !check_edit.agreement_accepted_at
-    ) {
+    // ✅ Handle agreement checkbox — save timestamp on first acceptance.
+    // FormData sends booleans as the string "true"/"false"; use parsed agreementAccepted, not === true on raw body.
+    if (agreementAccepted === true && !check_edit.agreement_accepted_at) {
       await Society_Registration.update(
-        { 
+        {
           is_agree_terms_condition: true,
-          agreement_accepted_at: new Date()
+          agreement_accepted_at: new Date(),
         },
         { where: { id: societyId } }
       );
-    } else if (req.body.is_agree_terms_condition === true) {
-      // Update agreement status but preserve original timestamp
+    } else if (agreementAccepted === true) {
       await Society_Registration.update(
         { is_agree_terms_condition: true },
         { where: { id: societyId } }
       );
-    } else if (req.body.is_agree_terms_condition === false) {
-      // Allow unchecking agreement (optional - based on requirements)
+    } else if (agreementAccepted === false) {
       await Society_Registration.update(
         { is_agree_terms_condition: false },
         { where: { id: societyId } }
@@ -1512,19 +1527,18 @@ exports.getSocietyAgreement = async (req, res) => {
             return res.status(404).json({ status: 404, message: 'Society not found' });
         }
 
-        // Format timestamp as "02 May 2026, 11:45 PM"
+        // Consent time in IST (same semantics as society portal agreement screen)
         const formatTimestamp = (date) => {
             if (!date) return "Not yet recorded";
-            const d = new Date(date);
-            const day = String(d.getDate()).padStart(2, '0');
-            const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-            const month = monthNames[d.getMonth()];
-            const year = d.getFullYear();
-            const hours = d.getHours();
-            const ampm = hours >= 12 ? 'PM' : 'AM';
-            const displayHours = hours % 12 || 12;
-            const minutes = String(d.getMinutes()).padStart(2, '0');
-            return `${day} ${month} ${year}, ${displayHours}:${minutes} ${ampm}`;
+            return new Date(date).toLocaleString("en-IN", {
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: true,
+                timeZone: "Asia/Kolkata",
+            });
         };
 
         // Agreement template with static text that needs to be replaced
