@@ -32,7 +32,11 @@ ALTER TABLE society_profile
 ALTER TABLE society_profile
   ADD COLUMN IF NOT EXISTS billing_qr_code_name VARCHAR(255) DEFAULT NULL;
 
--- 3. company_campaigns_logs: missing columns
+-- 3. society_registration: agreement timestamp (fixes signup email/mobile checks)
+ALTER TABLE society_registration
+  ADD COLUMN IF NOT EXISTS agreement_accepted_at TIMESTAMPTZ DEFAULT NULL;
+
+-- 4. company_campaigns_logs: missing columns
 ALTER TABLE company_campaigns_logs
   ADD COLUMN IF NOT EXISTS selected_assets TEXT DEFAULT NULL;
 
@@ -42,10 +46,11 @@ ALTER TABLE company_campaigns_logs
 -- Verify (optional - shows columns added)
 SELECT column_name, data_type
 FROM information_schema.columns
-WHERE table_name IN ('society_media_rate_cards', 'company_campaigns_logs', 'society_profile')
+WHERE table_name IN ('society_media_rate_cards', 'company_campaigns_logs', 'society_profile', 'society_registration')
   AND column_name IN (
     'availability_days', 'availability_month_days', 'whatsapp_details',
     'submission_stage', 'selected_assets', 'subtotal',
-    'billing_qr_code_path', 'billing_qr_code_name'
+    'billing_qr_code_path', 'billing_qr_code_name',
+    'agreement_accepted_at'
   )
 ORDER BY table_name, column_name;
