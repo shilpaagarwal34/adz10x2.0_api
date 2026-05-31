@@ -71,14 +71,15 @@ const computeSocietyProfileCompletionPercent = (user, profile) => {
   completion += (filledContact / contactInfo.length) * 33.25;
   completion += (filledLocation / location.length) * 33.25;
   
-  if (user.is_agree_terms_condition === true) {
+  // Platform agreement counts only after explicit profile acceptance (timestamp set)
+  if (user.agreement_accepted_at) {
       completion += 5;
   }
   
   let finalCompletion = Math.round(completion);
 
-  // Strictly enforce that if terms are not agreed, completion cannot be 100%
-  if (user.is_agree_terms_condition !== true && finalCompletion >= 100) {
+  // Strictly enforce that if platform agreement is not accepted, completion cannot be 100%
+  if (!user.agreement_accepted_at && finalCompletion >= 100) {
       finalCompletion = 99;
   }
 
@@ -1622,7 +1623,7 @@ exports.acceptAgreement = async (req, res) => {
             return res.status(404).json({ status: 404, message: 'Society not found' });
         }
         
-        if (society.is_agree_terms_condition) {
+        if (society.agreement_accepted_at) {
             return res.status(400).json({ 
                 status: 400, 
                 message: 'Agreement already accepted. Updates are not allowed.',

@@ -165,7 +165,6 @@ AWS.config.update({
                     address,
                     latitude,
                     longitude,
-                    is_agree_terms_condition
                 });
 
                 return res.status(200).json({
@@ -217,7 +216,7 @@ AWS.config.update({
             address,
             latitude,
             longitude,
-            is_agree_terms_condition,
+            is_agree_terms_condition: false,
             password: hashedPassword,
             // token,
             otp, 
